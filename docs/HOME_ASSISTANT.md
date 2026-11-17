@@ -37,6 +37,8 @@ already loaded (faster) model; the task text is always taken from your own words
 translate or embellish it. Follow-ups from the dashboard and forwarded mail keep using `FOLLOWUP_OLLAMA_MODEL`.
 
 ### 1. Token on the assistant side
+Run these in the folder where the assistant runs (the one with your `.env` and `secrets/`), not in a
+plain git checkout without them. If `secrets/capture_token` already has content, skip the first line.
 ```sh
 openssl rand -hex 32 > secrets/capture_token && chmod 600 secrets/capture_token
 docker compose --profile local-db up -d
