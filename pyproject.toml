@@ -6,6 +6,9 @@ build-backend = "hatchling.build"
 name = "mailassistant"
 version = "0.1.0"
 description = "Self-hosted, local-LLM email assistant for Proton Mail and Google Calendar"
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE"]
+authors = [{ name = "markus2929" }]
 requires-python = ">=3.12"
 dependencies = [
   "sqlalchemy>=2.0.30",

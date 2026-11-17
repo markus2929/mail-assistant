@@ -250,3 +250,16 @@ subscriptions). To choose them yourself: `GOOGLE_CONFLICT_CALENDARS=Family,Club`
 comma-separated; work + private are always included); `none` = only work + private.
 Names need one extra read-only Google permission: see docs/GOOGLE_SETUP.md ("Calendars by name").
 Old variables `GOOGLE_CALENDAR_IDS` / `GOOGLE_SHARED_CALENDAR_ID` still work. CLI: `gcal approve 12 --calendar private`.
+
+## Licence
+Copyright (C) 2026 markus2929
+
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero
+General Public License as published by the Free Software Foundation, either version 3 of the License, or (at
+your option) any later version. It is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See
+[LICENSE](LICENSE) for the full text.
+
+In short: you may use, change and share this project, keeping the copyright notice above. If you share a
+modified version, or let other people use a modified version over a network (for example the dashboard),
+you must make its source code available under the same licence.
