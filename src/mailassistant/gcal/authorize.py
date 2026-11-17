@@ -49,13 +49,8 @@ def exchange_code(client_id: str, client_secret: str, code: str, verifier: str, 
 
 
 def load_client_file(path: str) -> dict:
-    try:
-        with open(path, encoding="utf-8") as f:
-            raw = json.load(f)
-    except FileNotFoundError:
-        raise SystemExit(f"{path} is not available here. Google commands run in the worker container (the "
-                         "dashboard has no Google secrets):\n  docker compose run --rm --no-deps worker python -m "
-                         "mailassistant.gcal.authorize   (or ...gcal.cli <command>)") from None
+    with open(path, encoding="utf-8") as f:
+        raw = json.load(f)
     c = raw.get("installed") or raw.get("web") or raw
     if not c.get("client_id") or not c.get("client_secret"):
         raise ValueError("client file has no client_id/client_secret (download the Desktop app JSON)")
@@ -97,7 +92,16 @@ def main() -> int:
     from mailassistant.gcal.tokens import save_refresh_token
 
     s = get_settings()
-    client = load_client_file(s.google_client_file)
+    try:
+        client = load_client_file(s.google_client_file)
+    except FileNotFoundError:
+        print(f"{s.google_client_file} is not available here. Google commands run in the worker container (the "
+              "dashboard has no Google secrets):\n  docker compose run --rm --no-deps worker python -m "
+              "mailassistant.gcal.authorize")
+        return 1
+    except ValueError as e:
+        print(f"{s.google_client_file} is not a usable Desktop-app client file ({e}); see docs/GOOGLE_SETUP.md step 3")
+        return 1
     port = int(os.environ.get("GOOGLE_AUTH_PORT", "8765"))
     redirect = f"http://127.0.0.1:{port}/"
     verifier, challenge = make_pkce()

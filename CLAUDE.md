@@ -2,8 +2,8 @@
 
 Self-hosted, privacy-first AI email assistant for Proton Mail + Google Calendar. Python 3.12,
 PostgreSQL 17, SQLAlchemy 2, Pydantic, Docker Compose. Everything runs on the user's Arch Linux
-desktop (Ryzen 5 7600, RX 7700 XT 12 GB). Read `docs/ARCHITECTURE.md` and `README.md` first; they hold
-the design decisions and per-phase verification steps.
+desktop (Ryzen 5 7600, RX 7700 XT 12 GB). Read `docs/ARCHITECTURE.md` and `README.md` first (design decisions; installing and using);
+`docs/HISTORY.md` has the original per-phase notes and verification queries.
 
 ## Non-negotiable rules
 - **All LLM inference is local (Ollama, `OLLAMA_BASE_URL`).** No cloud AI APIs, ever.
