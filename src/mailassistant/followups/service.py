@@ -49,7 +49,8 @@ class FollowupError(Exception):
 
 # ------------------------------------------------------------------ helpers
 def _mine(settings: Settings, email: Email | None = None) -> set[str]:
-    own = {a.lower() for a in settings.my_addresses}
+    # capture addresses (me+agenda@...) are the user's own: such mail is handled by the capture job, not here
+    own = {a.lower() for a in [*settings.my_addresses, *settings.capture_addresses]}
     if email is not None and email.direction == "out" and email.from_addr:
         own.add(email.from_addr.lower())  # e.g. facturen@ or an old address the user sent from
     return own
@@ -124,7 +125,7 @@ def _sender(email: Email) -> str:
 
 
 # ------------------------------------------------------------------ extraction
-def _store_draft(session: Session, email: Email, d: FollowupDraft, reason: str, settings: Settings) -> Followup | None:
+def store_draft(session: Session, email: Email, d: FollowupDraft, reason: str, settings: Settings) -> Followup | None:
     if session.scalar(select(Followup.id).where(Followup.dedupe_key == d.dedupe_key)):
         return None
     mine = _mine(settings, email)
@@ -187,7 +188,7 @@ def extract_followups(session: Session, email: Email, client, settings: Settings
         min_confidence=settings.followup_min_confidence)
     if rejected:
         log.info("follow-up items rejected for email %s: %s", email.id, ",".join(rejected))
-    return [f for d in drafts if (f := _store_draft(session, email, d, res.reason, settings))]
+    return [f for d in drafts if (f := store_draft(session, email, d, res.reason, settings))]
 
 
 # ------------------------------------------------------------------ resolution (proposed only)
@@ -369,3 +370,15 @@ def set_deadline(session: Session, fid: int, day: date, settings: Settings) -> F
                         hour=settings.followup_remind_hour)
     f.remind_at, f.remind_basis, f.user_edited = when, "manual", True
     return _change(session, f, f.status, "followup_deadline_set", note=day.isoformat())
+
+
+def edit_action(session: Session, fid: int, text: str) -> Followup:
+    """Correct the description (e.g. garbled by speech recognition)."""
+    f = _get(session, fid)
+    if f.status not in OPEN_STATUSES:
+        raise FollowupError(f"follow-up is already {f.status}")
+    text = " ".join((text or "").split())[:200]
+    if not text:
+        raise FollowupError("the description cannot be empty")
+    old, f.action_text, f.user_edited = f.action_text, text, True
+    return _change(session, f, f.status, "followup_edited", note=f"was: {old}"[:300])

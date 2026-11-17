@@ -82,6 +82,11 @@ class Settings(BaseSettings):
     ha_ca_file: str = ""                    # CA/cert file if HA uses a self-signed certificate
     ha_notify_detail: str = "counts"       # counts = numbers + link only (push goes via Google/Apple) | full
 
+    # --- captures: things you add yourself (dashboard, Home Assistant Assist, mail to a capture address) ---
+    capture_addresses: Annotated[list[str], NoDecode] = []   # e.g. me+agenda@example.com,me+todo@example.com
+    capture_token: SecretStr | None = None   # secret file; bearer token for POST /api/capture (empty = API off)
+    capture_wait_seconds: float = 20.0       # how long /api/capture waits for the result to read back
+
     # --- follow-ups and briefing (Phase 5) ---
     followup_window_days: int = 30          # only mail newer than this is scanned for commitments
     followup_ollama_model: str | None = None  # model for follow-ups (None = OLLAMA_MODEL); careful > fast here
@@ -106,7 +111,7 @@ class Settings(BaseSettings):
 
     @field_validator("sync_include", "sync_exclude", "google_calendar_ids", "web_allowed_hosts",
                      "calendar_work_addresses", "google_extra_calendars", "google_conflict_calendars",
-                     mode="before")
+                     "capture_addresses", mode="before")
     @classmethod
     def _split_patterns(cls, v):
         if isinstance(v, str):

@@ -161,7 +161,7 @@ def _same_as_open_proposal(session: Session, d: Draft, from_ics: bool, settings:
     return None, False
 
 
-def _store_draft(session: Session, email: Email, d: Draft, attachment_id: int | None, settings: Settings) -> EventProposal | None:
+def store_draft(session: Session, email: Email, d: Draft, attachment_id: int | None, settings: Settings) -> EventProposal | None:
     if session.scalar(select(EventProposal.id).where(EventProposal.dedupe_key == d.dedupe_key)):
         return None  # already proposed (same invitation / same extraction)
     if d.ics_uid:  # an updated invitation replaces still-open older proposals for the same UID
@@ -243,7 +243,7 @@ def scan_email(session: Session, email_id: int, llm_client, settings: Settings, 
                              entity_type="email", entity_id=email_id,
                              detail=f"uid={d.ics_uid} withdrawn={n} already_created_proposal={created}")
                 continue
-            if p := _store_draft(session, email, d, att.id, settings):
+            if p := store_draft(session, email, d, att.id, settings):
                 out.append(p)
     session.commit()  # ICS results are safe to keep even if the model step below has to be retried
 
@@ -261,7 +261,7 @@ def scan_email(session: Session, email_id: int, llm_client, settings: Settings, 
                 min_confidence=settings.calendar_min_confidence)
             if d is None:
                 log.info("model extraction rejected: %s", why)
-            elif p := _store_draft(session, email, d, None, settings):
+            elif p := store_draft(session, email, d, None, settings):
                 out.append(p)
         except StructuredOutputError:
             log.info("event extraction: model output unusable for email %s", email_id)

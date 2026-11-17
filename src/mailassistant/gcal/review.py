@@ -87,3 +87,48 @@ def request_approval(session: Session, proposal_id: int, *, accept_conflicts: bo
     audit.record(session, actor="user", action="event_approval_requested", entity_type="event_proposal",
                  entity_id=p.id, detail=f"accept_conflicts={bool(accept_conflicts)} calendar={p.target_calendar}")
     return p
+
+
+def edit_proposal(session: Session, proposal_id: int, settings: Settings, *, title: str, day, all_day: bool,
+                  start_time=None, end_time=None, location: str | None = None) -> EventProposal:
+    """Change a proposal before approving it (database only). The dedupe key - and with it the deterministic
+    Google event id - stays the same; conflicts are re-checked against the live calendars when approving."""
+    from datetime import datetime, time, timedelta
+    from zoneinfo import ZoneInfo
+
+    p = session.get(EventProposal, proposal_id, with_for_update=True)
+    if p is None:
+        raise ReviewError(f"no proposal {proposal_id}")
+    if p.status not in ("proposed", "failed"):
+        raise ReviewError(f"proposal is already {p.status}")
+    if approval_pending(p):
+        raise ReviewError("it is being created right now")
+    title = (title or "").strip()[:200]
+    if not title:
+        raise ReviewError("a title is needed")
+    z = ZoneInfo(p.tz_name or settings.timezone)
+    if all_day:
+        start = datetime.combine(day, time.min, tzinfo=z)
+        end = start + timedelta(days=1)
+    else:
+        if start_time is None:
+            raise ReviewError("a start time is needed (or choose all day)")
+        start = datetime.combine(day, start_time, tzinfo=z)
+        end = datetime.combine(day, end_time, tzinfo=z) if end_time is not None else \
+            start + timedelta(minutes=settings.calendar_default_event_minutes)
+        if end <= start:
+            raise ReviewError("the end must be after the start")
+    if end <= utcnow():
+        raise ReviewError("that is in the past")
+    before = {"title": p.title, "start": p.start_at.isoformat() if p.start_at else None,
+              "end": p.end_at.isoformat() if p.end_at else None, "all_day": p.all_day, "location": p.location}
+    p.title, p.all_day, p.location = title, all_day, (location or "").strip()[:300] or None
+    p.start_at, p.end_at = start.astimezone(utcnow().tzinfo), end.astimezone(utcnow().tzinfo)
+    p.conflicts = []   # re-checked against the live calendars when approving
+    if p.status == "failed":
+        p.status, p.approval_result = "proposed", None
+    p.notes = [n for n in (p.notes or []) if n != "edited_by_you"] + ["edited_by_you"]
+    audit.record(session, actor="user", action="event_proposal_edited", entity_type="event_proposal", entity_id=p.id,
+                 before=before, after={"title": p.title, "start": p.start_at.isoformat(), "end": p.end_at.isoformat(),
+                                       "all_day": p.all_day, "location": p.location})
+    return p

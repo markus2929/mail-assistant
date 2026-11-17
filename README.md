@@ -20,6 +20,9 @@ and it never sends your mail to a cloud AI service.
 - **Tracks follow-ups**: things *you owe* (someone asked you for something, or you promised it) and things
   you are *waiting for* (you asked someone, or they promised you). Explicit deadlines become reminders; a
   later mail that seems to settle it is offered as "done?", never closed silently.
+- **Add things yourself**: forward a WhatsApp or other message to a special address of yours, paste or type
+  it on the dashboard, or say it to Home Assistant Assist ("zet tandarts dinsdag om 3 uur in mijn agenda") -
+  Assist reads back what it understood or what is missing.
 - **Daily briefing**: today's calendar, overdue and due follow-ups, new proposals - on the dashboard and,
   optionally, as a Home Assistant notification on your phone.
 - **Dashboard** (HTTPS, password login) to confirm or reject proposals in bulk, approve events, correct
@@ -115,7 +118,7 @@ printf '%s' 'THE-BRIDGE-GENERATED-IMAP-PASSWORD' > secrets/imap_password
 .venv/bin/python -m mailassistant.web.makecert       # HTTPS certificate for the dashboard
 .venv/bin/python -m mailassistant.web.setpassword    # dashboard password (run in a normal terminal)
 
-touch secrets/google_client secrets/fernet_key secrets/ha_token   # placeholders for the optional parts
+touch secrets/google_client secrets/fernet_key secrets/ha_token secrets/capture_token   # optional parts (empty = off)
 chmod 600 secrets/*
 ```
 
@@ -149,19 +152,14 @@ GOOGLE_PRIVATE_CALENDAR=Family               # optional; empty = one calendar fo
 GOOGLE_CONFLICT_CALENDARS=                   # empty = all calendars you own; or e.g. Family,Sports club
 ```
 
-### 7. Optional: Home Assistant notifications
+### 7. Optional: Home Assistant notifications and voice
 
-Create a long-lived access token in Home Assistant (Profile → Security), put it in `secrets/ha_token`, and set
-in `.env`:
+Notifications (briefing, due follow-ups): put a long-lived access token in `secrets/ha_token` and set `HA_URL`,
+`HA_NOTIFY_SERVICE` and `HA_NOTIFY_DETAIL` in `.env`. Push notifications to the Companion app pass through Google's
+or Apple's push service, which is why the default only sends numbers and a link.
 
-```sh
-HA_URL=https://homeassistant.local:8123
-HA_NOTIFY_SERVICE=mobile_app_your_phone      # Developer tools → Actions → notify.*
-HA_NOTIFY_DETAIL=counts                      # counts only (default) or full (adds short texts)
-```
-
-Push notifications to the Companion app pass through Google's or Apple's push service, which is why the
-default only sends numbers and a link. Test it with **Send test notification** on the dashboard's Status page.
+Voice (Assist): `openssl rand -hex 32 > secrets/capture_token` and add the ready-made sentences and REST command to
+Home Assistant. Both are described step by step in [docs/HOME_ASSISTANT.md](docs/HOME_ASSISTANT.md).
 
 After changing `.env` or secrets: `docker compose --profile local-db up -d`.
 
@@ -172,8 +170,9 @@ After changing `.env` or secrets: `docker compose --profile local-db up -d`.
 | Page | What you do there |
 |---|---|
 | **Briefing** | Today's calendar, overdue and due follow-ups, closures to check, new proposals. |
+| **Add** | Paste, type or dictate an appointment or follow-up (e.g. a WhatsApp invitation); shows what was proposed or what was missing. |
 | **Follow-ups** | Tick items and **Confirm / Reject / Done** in one go. Per item: accept or dismiss a proposed closure, snooze, set a deadline, see the quoted evidence and history. |
-| **Calendar** | Each proposed event with conflicts and the evidence. **Approve → work** or **Approve → private** (the suggested calendar is highlighted). Approving is one at a time - each creates a real event after a fresh conflict check; rejecting works in bulk. |
+| **Calendar** | Each proposed event with conflicts and the evidence. **Approve → work** or **Approve → private** (the suggested calendar is highlighted). Approving is one at a time - each creates a real event after a fresh conflict check; rejecting works in bulk. **Edit** a proposal first if the time, date or title is not right. |
 | **Mail** | Recent mail per category with the model's reason; correct the category where it is wrong. |
 | **Status** | Health of the worker, Ollama, Bridge, Google and Home Assistant; which calendars are used; queue and model statistics. |
 
@@ -187,6 +186,17 @@ calendar proposals you want, and occasionally correct a classification.
   for things you owe and 5 for things you are waiting for (`FOLLOWUP_ESTIMATE_DAYS_*`).
 - When a later mail seems to deliver what was owed (in the same thread or a new one with the same person),
   the item shows **closure proposed**. You decide.
+
+### Adding appointments and follow-ups yourself
+
+| Way | How |
+|---|---|
+| Forward by mail | From any app: Share → Proton Mail → `you+agenda@…` (appointment) or `you+todo@…` (follow-up). Set the addresses in `CAPTURE_ADDRESSES`. Only mail you sent yourself counts. |
+| Dashboard | **Add** page: paste, type, or use your phone keyboard's voice typing. |
+| Voice | Home Assistant Assist: "zet … in mijn agenda", "plan …", "herinner me aan …", "ik moet …". |
+
+For things you add yourself, "om 3 uur" means 15:00 (marked "afternoon assumed"), and an explicit request also
+turns a sign-up request or a mere mention into an appointment proposal. Everything is still a proposal you approve.
 
 ### Command line
 
@@ -226,6 +236,7 @@ Everything is set in `.env` (non-secret) and `secrets/` (secret). The most usefu
 | `WEB_HOST` / `WEB_PORT` / `WEB_TLS` | `127.0.0.1` / `8443` / `self` | dashboard address (`.env.example` uses `0.0.0.0` = your LAN); `WEB_TLS=off` is only allowed on `127.0.0.1` |
 | `WEB_ALLOWED_HOSTS` | `localhost,127.0.0.1` | host names the dashboard answers to |
 | `HA_URL` / `HA_NOTIFY_SERVICE` / `HA_NOTIFY_DETAIL` | off | Home Assistant notifications |
+| `CAPTURE_ADDRESSES` / `CAPTURE_WAIT_SECONDS` | empty / `20` | your +agenda/+todo addresses; how long voice waits for the answer |
 | `LLM_LOG_PROMPTS` / `LLM_LOG_RETENTION_DAYS` | `true` / `14` | keep prompts for debugging, purged after this many days |
 
 | Secret file | Needed for |
@@ -234,7 +245,8 @@ Everything is set in `.env` (non-secret) and `secrets/` (secret). The most usefu
 | `imap_password` | Proton Mail Bridge |
 | `web_password_hash`, `web_tls_cert`, `web_tls_key` | the dashboard |
 | `google_client`, `fernet_key` | Google Calendar (empty file = off) |
-| `ha_token` | Home Assistant (empty file = off) |
+| `ha_token` | Home Assistant notifications (empty file = off) |
+| `capture_token` | voice via Home Assistant Assist (empty file = off) |
 
 ### Choosing models
 

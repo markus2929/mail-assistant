@@ -375,3 +375,22 @@ class ServiceStatus(Base):
     ok: Mapped[bool] = mapped_column(Boolean)
     detail: Mapped[str | None] = mapped_column(Text)                      # never mail content
     checked_at: Mapped[datetime] = mapped_column(TZ, server_default=NOW)
+
+
+class Capture(Base):
+    """Something the user added themself (dashboard, voice, mail to a +agenda/+todo address). The text lives in
+    an Email row (real for forwarded mail, synthetic otherwise) so proposals can reference it like any mail."""
+    __tablename__ = "captures"
+    __table_args__ = (
+        CheckConstraint(_in("source", ["mail", "dashboard", "assist"])),
+        CheckConstraint(_in("kind", ["event", "followup", "auto"])),
+        CheckConstraint(_in("status", ["queued", "done", "nothing", "failed"])),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email_id: Mapped[int] = mapped_column(ForeignKey("emails.id"), unique=True)
+    source: Mapped[str] = mapped_column(String(10))
+    kind: Mapped[str] = mapped_column(String(10))
+    status: Mapped[str] = mapped_column(String(10), server_default="queued")
+    result: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=EMPTY_OBJ)  # what was proposed / why not
+    created_at: Mapped[datetime] = mapped_column(TZ, server_default=NOW)
+    processed_at: Mapped[datetime | None] = mapped_column(TZ)

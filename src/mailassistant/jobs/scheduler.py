@@ -22,6 +22,7 @@ PERIODIC = [
     ("followups.briefing", 3600, {}, "followups.briefing"),
     ("notify.briefing", 900, {}, "notify.briefing"),
     ("notify.due", 900, {}, "notify.due"),
+    ("capture.scan_mail", 60, {}, "capture.scan_mail"),
 ]
 
 

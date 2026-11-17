@@ -123,9 +123,19 @@ def signup_request_unconfirmed(text: str) -> bool:
 
 def draft_from_extraction(data: dict, *, subject: str | None, body: str, sent_at: datetime, now: datetime,
                           default_tz: str, default_minutes: int, source_key: str,
-                          min_confidence: float = 0.5) -> tuple[Draft | None, str | None]:
-    """`data` is the validated model output as a dict (see EventExtraction)."""
+                          min_confidence: float = 0.5, capture: bool = False,
+                          intent_event: bool = False) -> tuple[Draft | None, str | None]:
+    """`data` is the validated model output as a dict (see EventExtraction).
+
+    capture=True: the text was written or forwarded by the user themself (dashboard, voice, +agenda mail):
+    a bare 1-6 o'clock means afternoon (noted), and with intent_event=True ("zet in mijn agenda", +agenda)
+    a sign-up request or a mere mention still becomes an appointment proposal (noted). All other checks stay."""
+    # some models write "null"/"none" instead of an empty string: treat as empty
+    data = {k: ("" if isinstance(v, str) and v.strip().lower() in ("null", "none", "n/a") else v) for k, v in data.items()}
     kind = data.get("kind")
+    if capture and intent_event and kind == "mention":
+        kind = "invitation"
+        data = {**data, "_upgraded": True}
     if kind not in ("invitation", "proposed_date", "mention"):
         return None, "no_event"
     text = f"{subject or ''}\n{body}"
@@ -140,10 +150,15 @@ def draft_from_extraction(data: dict, *, subject: str | None, body: str, sent_at
     if dr.value is None:
         return None, "date_range" if "date_range" in dr.issues else "date_unresolved"
     notes, conf = list(dr.issues), min(float(data.get("confidence", 0)), 0.95)
+    if data.get("_upgraded"):
+        notes.append("added_by_you")
     if kind != "mention" and signup_request_unconfirmed(text):
-        kind = "mention"  # shown for information, can never be created; the confirmation mail can
-        notes.append("signup_request_not_confirmed")
-    conf -= 0.05 * sum(i in ("year_inferred", "ambiguous_next_weekday") for i in dr.issues)
+        if capture and intent_event:
+            notes.append("added_by_you")        # the user asked for it explicitly
+        else:
+            kind = "mention"  # shown for information, can never be created; the confirmation mail can
+            notes.append("signup_request_not_confirmed")
+    conf -= 0.05 * sum(i in ("year_inferred", "month_inferred", "ambiguous_next_weekday") for i in dr.issues)
     conf -= 0.35 * ("weekday_mismatch" in dr.issues)
 
     tz = default_tz
@@ -160,13 +175,17 @@ def draft_from_extraction(data: dict, *, subject: str | None, body: str, sent_at
     else:
         if not start_txt or start_txt not in sq:
             return None, "time_text_not_found"
-        tr = resolve_time(start_txt if not data.get("end_time_text") else f"{start_txt} - {data['end_time_text']}")
+        tr = resolve_time(start_txt if not data.get("end_time_text") else f"{start_txt} - {data['end_time_text']}",
+                          assume_afternoon=capture)
         if tr.start is None:
             return None, "time_unresolved"
+        notes += [i for i in tr.issues if i == "assumed_afternoon"]
         local_start = datetime.combine(dr.value, tr.start, tzinfo=ZoneInfo(tz))
         end_t = tr.end
         if end_t is None and data.get("end_time_text"):
-            end_t = resolve_time(_squash(data["end_time_text"])).start
+            end_t = resolve_time(_squash(data["end_time_text"]), assume_afternoon=capture).start
+            if capture and end_t is not None and end_t <= tr.start and end_t.hour + 12 < 24:
+                end_t = end_t.replace(hour=end_t.hour + 12)
         if end_t is not None:
             local_end = datetime.combine(dr.value, end_t, tzinfo=ZoneInfo(tz))
             if local_end <= local_start:

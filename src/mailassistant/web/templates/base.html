@@ -14,6 +14,7 @@
 <header class="top">
   <nav>
     <a href="/" class="{{ 'on' if path == '/' }}">Briefing</a>
+    <a href="/capture" class="{{ 'on' if path.startswith('/capture') }}">Add</a>
     <a href="/followups" class="{{ 'on' if path.startswith('/followups') }}">Follow-ups</a>
     <a href="/calendar" class="{{ 'on' if path.startswith('/calendar') }}">Calendar</a>
     <a href="/mail" class="{{ 'on' if path.startswith('/mail') }}">Mail</a>

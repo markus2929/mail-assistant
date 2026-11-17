@@ -159,3 +159,19 @@ a tunnel; the code does not assume where Bridge or Ollama run.
   `GOOGLE_CONFLICT_CALENDARS` (comma-separated names/IDs; `none` = only work + private).
   `gcal/routing.py` suggests work/private; the user picks (`event_proposals.target_calendar`, migrations 0007/0008).
   Private events use `build_event_body(minimal=True)`: no description, no source message id.
+
+## Captures (2026-11-18): things the user adds without mail
+- Channels: mail the user sent to `CAPTURE_ADDRESSES` (or to themself with `agenda:`/`todo:` subject) - must be in a
+  Sent mailbox, so others cannot inject; the dashboard "Add" page; `POST /api/capture` with a bearer token
+  (`secrets/capture_token`) for Home Assistant Assist. No Gemini/cloud AI (project rule).
+- Each capture is an `Email` row (the real one, or a synthetic one: `<capture-…@mail-assistant.local>`, direction
+  `out`, `headers._capture`, no mailbox location, scan flags set) plus a `captures` row (migration 0009). Job
+  `capture.process` uses prompts `capture-event-v1` / `capture-followup-v1` (same schemas) and the normal
+  `gcal.service.store_draft` / `followups.service.store_draft`, so duplicates, conflicts and calendar suggestions
+  behave exactly like mail. The full text is used (forwarded content is the point), injection signals still block.
+- Capture-only rules (flag `capture=True`; mail unchanged): bare 1-6 o'clock = afternoon (`assumed_afternoon`);
+  with event intent, sign-up requests and mentions become invitations (`added_by_you`).
+- `/api/capture` creates the capture and polls the DB up to `CAPTURE_WAIT_SECONDS` for the worker's result; the
+  reply sentence comes from `capture/speech.py` (code, not model). The web app stays DB-only.
+- Edit before approving: `gcal.review.edit_proposal` (keeps the dedupe key, so the deterministic Google event id
+  and duplicate protection stay; conflicts re-checked at approval) and `followups.service.edit_action`.

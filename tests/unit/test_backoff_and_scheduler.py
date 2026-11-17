@@ -23,8 +23,8 @@ def test_scheduler_fires_once_then_waits(monkeypatch):
                                                  "mail.sync", "mail.sync.full",
                                                  "classify.pending", "gcal.sync", "gcal.scan_pending",
                                                  "followups.scan_pending", "followups.briefing",
-                                                 "notify.briefing", "notify.due"}
+                                                 "notify.briefing", "notify.due", "capture.scan_mail"}
     assert scheduler.tick(last, 1030.0) == []                # nothing due after 30 s
     assert scheduler.tick(last, 1061.0) == ["system.ping", "mail.sync", "classify.pending", "gcal.scan_pending",
-                                            "followups.scan_pending"]  # every 60 s
+                                            "followups.scan_pending", "capture.scan_mail"]  # every 60 s
     assert "mail.sync.full" in scheduler.tick(last, 4601.0)  # hourly full reconcile

@@ -41,6 +41,8 @@
     <form method="post" action="/followups/{{ f.id }}/snooze"><input type="hidden" name="csrf" value="{{ csrf }}">
       <label>Snooze <input type="number" name="days" value="2" min="1" max="60" class="short"> working days</label> <button class="secondary">Snooze</button></form>
     {% endif %}
+    <form method="post" action="/followups/{{ f.id }}/edit"><input type="hidden" name="csrf" value="{{ csrf }}">
+      <label>Description <input name="text" value="{{ f.action_text }}" maxlength="200" class="wide"></label> <button class="secondary">Save</button></form>
     <form method="post" action="/followups/{{ f.id }}/deadline"><input type="hidden" name="csrf" value="{{ csrf }}">
       <label>Deadline <input type="date" name="day" required></label> <button class="secondary">Set</button></form>
   </div>

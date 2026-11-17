@@ -99,6 +99,18 @@ def resolve_date(text: str, ref: date) -> DateResult:
         result = _infer_year(int(m[2]), int(m[1]), ref, issues)
 
     wd = re.search(rf"\b({_WD_RE})\b", t)
+    if result is None and wd and (m := re.search(
+            rf"\b(?:{_WD_RE})\b\.?,?\s+(?:de\s+)?(\d{{1,2}})(?:e|ste|de|st|nd|rd|th)?\b(?![:.]\d|\s*(?:uur|u|h)\b)", t)):
+        # "dinsdag 25" without a month: the 25th of this month (or the next one if it has passed) - never
+        # silently dropped; the weekday check below reports a contradiction
+        n = int(m[1])
+        cand = _make(ref.year, ref.month, n)
+        if cand is None or cand < ref - timedelta(days=2):
+            ny, nm = (ref.year + 1, 1) if ref.month == 12 else (ref.year, ref.month + 1)
+            cand = _make(ny, nm, n)
+        if cand is not None:
+            result = cand
+            issues.append("month_inferred")
     if result is not None:
         if wd and WEEKDAYS[wd[1]] != result.weekday():
             issues.append("weekday_mismatch")
@@ -137,8 +149,28 @@ def _hm(h: str, mi: str | None) -> time | None:
     return time(hh, mm) if 0 <= hh <= 23 and 0 <= mm <= 59 else None
 
 
-def resolve_time(text: str) -> TimeResult:
-    """Parse a start (and optional end) time. Bare numbers are not accepted without ':' or 'uur'/'u'."""
+_MORNING_NIGHT = r"ochtend|'s ?morgens|\bmorgens\b|nacht|\bam\b|a\.m\.|\bvroeg\b|morning|night"
+
+
+def _afternoon(r: "TimeResult", t: str) -> "TimeResult":
+    """Captures only: spoken/typed "om 3 uur" means 15:00. 1-6 o'clock without a morning/night word -> +12 h."""
+    if r.start is None or re.search(_MORNING_NIGHT, t) or re.search(_PM, t):
+        return r
+    changed = False
+    if 1 <= r.start.hour <= 6:
+        r.start, changed = r.start.replace(hour=r.start.hour + 12), True
+    if r.end is not None and 1 <= r.end.hour <= 6 and (changed or r.end.hour < (r.start.hour % 12 or 12)):
+        r.end, changed = r.end.replace(hour=r.end.hour + 12), True
+    if changed:
+        r.issues.append("assumed_afternoon")
+    return r
+
+
+def resolve_time(text: str, *, assume_afternoon: bool = False) -> TimeResult:
+    """Parse a start (and optional end) time. Bare numbers are not accepted without ':' or 'uur'/'u'.
+    assume_afternoon: for the user's own captures only (see _afternoon)."""
+    if assume_afternoon:
+        return _afternoon(resolve_time(text), _norm(text))
     t = _norm(text)
     if not t:
         return TimeResult(None, None, ["no_time_found"])

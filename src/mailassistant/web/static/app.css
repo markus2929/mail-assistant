@@ -30,3 +30,5 @@ ul.plain { list-style:none; padding:0; } ul.plain li { padding:4px 0; border-bot
 footer { text-align:center; color:var(--muted); font-size:.8rem; padding:24px; }
 @media (max-width: 700px) { .list thead { display:none; } .list tr { display:block; border-bottom:1px solid var(--line); padding:6px 0; } .list td { display:block; border:none; padding:2px 4px; } }
 form.approve button { margin:2px 4px 2px 0; }
+textarea { width:100%; font:inherit; padding:6px; } .tag.warn { border-color:var(--warn); color:var(--warn); }
+.editform label { display:block; margin:8px 0; } .editform input[name=title], .editform input[name=location], input.wide { width:min(100%, 32em); }

@@ -31,10 +31,13 @@
     <td>{{ p.start_at|local('%a %d %b %Y' if p.all_day else '%a %d %b %Y %H:%M') }}{% if not p.all_day %}–{{ p.end_at|local('%H:%M') }}{% endif %}</td>
     <td><b>{{ p.title or '(no title)' }}</b> <span class="tag">{{ p.kind }}</span>
       {% if p.location %}<div class="small">@ {{ p.location }}</div>{% endif %}
-      <div class="muted small">from {{ e.from_addr }} — “{{ e.subject or '(no subject)' }}”</div>
+      {% set capt = (e.headers or {}).get('_capture') %}
+      {% if capt %}<div class="small"><span class="tag">added by you via {{ {'assist': 'voice', 'dashboard': 'dashboard', 'mail': 'forwarded mail'}[capt.source] }}</span></div>
+      {% else %}<div class="muted small">from {{ e.from_addr }} — “{{ e.subject or '(no subject)' }}”</div>{% endif %}
       {% if p.evidence_quote %}<div class="muted small">“{{ p.evidence_quote|truncate(160) }}”</div>{% endif %}
       {% for c in p.conflicts or [] %}<div class="small"><span class="tag {{ 'hot' if c.type == 'overlap' }}">{{ c.type }}</span> {{ c.summary or '' }} {{ c.start|local if c.start }}</div>{% endfor %}
-      {% for n in p.notes or [] %}<div class="muted small">note: {{ n }}</div>{% endfor %}
+      {% for n in p.notes or [] %}{% if n in ('assumed_afternoon', 'added_by_you', 'edited_by_you', 'weekday_mismatch') %}<div class="small"><span class="tag warn">{{ {'assumed_afternoon': 'afternoon assumed - check the time', 'added_by_you': 'added on your request', 'edited_by_you': 'edited by you', 'weekday_mismatch': 'day and date do not match - check the date'}[n] }}</span></div>{% else %}<div class="muted small">note: {{ n }}</div>{% endif %}{% endfor %}
+      {% if show == 'open' and p.status in ('proposed', 'failed') and not approval_pending(p) %}<div class="small"><a href="/calendar/{{ p.id }}/edit">edit</a></div>{% endif %}
     </td>
     <td>{{ p.status }}{% if p.status == 'created' and p.target_calendar %} <span class="tag">{{ p.target_calendar }}</span>{% endif %}
       {% if p.approval_result %}<div class="small {{ 'hot' if p.approval_result.startswith(('failed', 'conflicts')) }}">{{ p.approval_result }}</div>{% endif %}

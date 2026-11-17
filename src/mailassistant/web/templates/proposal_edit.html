@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Edit proposal #{{ p.id }}{% endblock %}
+{% block main %}
+<p><a href="/calendar">← Calendar</a></p>
+<h1>Edit proposal #{{ p.id }}</h1>
+<p class="muted">Change what is wrong, then approve it on the Calendar page. Conflicts are checked again when you approve.</p>
+<form method="post" action="/calendar/{{ p.id }}/edit" class="editform">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <label>Title <input name="title" value="{{ p.title or '' }}" maxlength="200" required></label>
+  <label>Date <input type="date" name="day" value="{{ day }}" required></label>
+  <label><input type="checkbox" name="all_day" value="1" {{ 'checked' if p.all_day }}> All day</label>
+  <div class="row">
+    <label>From <input type="time" name="start" value="{{ '' if p.all_day else start }}"></label>
+    <label>Until <input type="time" name="end" value="{{ '' if p.all_day else end }}"></label>
+  </div>
+  <label>Location <input name="location" value="{{ p.location or '' }}" maxlength="300"></label>
+  <div class="row"><button>Save</button> <a href="/calendar">Cancel</a></div>
+</form>
+{% if p.evidence_quote %}<h2>From the text</h2><blockquote>{{ p.evidence_quote }}</blockquote>{% endif %}
+{% endblock %}

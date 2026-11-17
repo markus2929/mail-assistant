@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block head %}{% if cap and cap.status == 'queued' %}<meta http-equiv="refresh" content="3">{% endif %}{% endblock %}
+{% block title %}Add{% endblock %}
+{% block main %}
+{% if cap %}
+<p><a href="/capture">← Add another</a></p>
+<h1>Added {{ 'via ' ~ cap.source }}</h1>
+<blockquote>{{ email.body_text }}</blockquote>
+{% if cap.status == 'queued' %}
+  <p class="info">Being processed by the worker on the desktop… this page refreshes by itself.</p>
+{% else %}
+  <p class="{{ 'info' if cap.status == 'done' else 'warn' }}">{{ summary }}</p>
+  {% for e in cap.result.events or [] %}<p>→ <a href="/calendar">calendar proposal #{{ e.id }}</a>: {{ e.title }}, {{ e.start|local('%a %d %b' if e.all_day else '%a %d %b %H:%M') }}
+    {% for n in e.notes if n in ('assumed_afternoon', 'added_by_you') %}<span class="tag warn">{{ n }}</span>{% endfor %}
+    · <a href="/calendar/{{ e.id }}/edit">edit</a></p>{% endfor %}
+  {% for f in cap.result.followups or [] %}<p>→ <a href="/followups/{{ f.id }}">follow-up #{{ f.id }}</a>: {{ f.action }}</p>{% endfor %}
+{% endif %}
+{% else %}
+<h1>Add an appointment or follow-up</h1>
+<p class="muted">Paste a message (for example a WhatsApp invitation) or type or dictate what you want to plan.
+  It becomes a proposal that you approve, exactly like one from mail.</p>
+<form method="post" action="/capture">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <textarea name="text" rows="6" maxlength="4000" required placeholder="Zaterdag 14 december om 20:00 verjaardag Jan, bij hem thuis&#10;of: herinner me vrijdag Piet te bellen over de offerte"></textarea>
+  <div class="row">
+    {% for k, label in kinds.items() %}<label><input type="radio" name="kind" value="{{ k }}" {{ 'checked' if k == 'auto' }}> {{ label }}</label>{% endfor %}
+    <button>Add</button>
+  </div>
+</form>
+{% if recent %}
+<h2>Recently added</h2>
+<table class="list"><tbody>
+{% for c, e in recent %}<tr><td class="nowrap small">{{ c.created_at|local('%d %b %H:%M') }}</td><td class="small">{{ c.source }}</td>
+  <td><a href="/capture/{{ c.id }}">{{ (e.body_text or '')|truncate(90) }}</a></td>
+  <td><span class="tag {{ 'ok' if c.status == 'done' else ('hot' if c.status in ('nothing', 'failed') else '') }}">{{ c.status }}</span></td></tr>{% endfor %}
+</tbody></table>
+{% endif %}
+{% endif %}
+{% endblock %}

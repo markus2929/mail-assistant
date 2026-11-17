@@ -104,7 +104,7 @@ def drafts_from_extraction(data: dict, *, mail_direction: str, own: str, subject
             direction=direction, action_text=action, evidence_quote=quote[:600], confidence=round(conf, 2),
             dedupe_key=_key("fu", message_id, direction, _squash(action)), deadline_at=deadline,
             deadline_text=(item.get("deadline_text") or "").strip() or None,
-            notes=[f"from_{mail_direction}going_mail", *notes]))
+            notes=["added_by_you" if mail_direction == "capture" else f"from_{mail_direction}going_mail", *notes]))
     return drafts, rejected
 
 

@@ -33,7 +33,7 @@ desktop (Ryzen 5 7600, RX 7700 XT 12 GB). Read `docs/ARCHITECTURE.md` and `READM
 - Migrations: 0001 is generated from the models (`scripts/init-baseline-migration.sh`); later ones live in
   `migrations/pending/` and are copied to `migrations/versions/` (they are idempotent `IF NOT EXISTS`
   so fresh installs work). With the code on your own machine you may simplify this to normal
-  `alembic revision --autogenerate` - but do not break existing deployments (0001-0008 applied).
+  `alembic revision --autogenerate` - but do not break existing deployments (0001-0009 applied).
 - Google commands run in the worker container (`docker compose run --rm --no-deps worker python -m
   mailassistant.gcal.authorize|gcal.cli ...`); `web` has no Google/IMAP/Fernet secrets on purpose.
 - After editing code: `docker compose build` (code is baked into the image), then `docker compose --profile local-db up -d`.
@@ -61,6 +61,12 @@ desktop (Ryzen 5 7600, RX 7700 XT 12 GB). Read `docs/ARCHITECTURE.md` and `READM
   (name or ID; user wanted role names, not "shared"), suggestion + user choice, minimal event details on the
   private one; conflicts: all own calendars, or exactly `GOOGLE_CONFLICT_CALENDARS` (user's choice). Names need scope
   `calendar.calendarlist.readonly` = one re-run of `gcal.authorize` (migrations 0007, 0008).
+- Captures (2026-11-18): appointments/follow-ups added without mail - forward to `CAPTURE_ADDRESSES` (+agenda/+todo,
+  must be in Sent), dashboard "Add" page, Home Assistant Assist via `POST /api/capture` (bearer token, reads the
+  result back; built by code). User decisions: no Gemini (cloud AI); bare 1-6 o'clock = afternoon (marked);
+  explicit intent upgrades sign-up/mention to invitation; no voice conversation, instead read-back + "edit before
+  approving" (calendar proposals and follow-up texts). Package `src/mailassistant/capture/`, migration 0009,
+  docs/HOME_ASSISTANT.md. Possible later: photo/screenshot capture with a local vision model.
 - Pending decision (revisit ~2026-11-24, after a week of dashboard use): classification corrections are stored
   (`classification_corrections`) but NOT used for future mail. Proposed: deterministic sender rules (user's category
   for later mail from that sender; safety policy still wins; visible/removable in the dashboard; a correction to

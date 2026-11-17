@@ -75,3 +75,13 @@ def test_date_ranges_and_choices_are_not_resolved_to_one_day():
     for t in ("12 november 14-16 uur", "november 12 14-16h", "15 december 2026 20:00 - 22:00",
               "1 december tot 14:00", "24-11-2026"):
         assert resolve_date(t, ref).value is not None, t
+
+
+def test_weekday_with_bare_day_number_is_not_dropped():
+    ref = date(2026, 11, 17)                                   # Tuesday
+    r = resolve_date("dinsdag 25", ref)                        # the 25th is a Wednesday
+    assert r.value == date(2026, 11, 25) and r.issues == ["month_inferred", "weekday_mismatch"]
+    assert resolve_date("woensdag 25", ref).issues == ["month_inferred"]
+    assert resolve_date("vrijdag 3", ref).value == date(2026, 12, 3)          # passed this month -> next month
+    assert resolve_date("dinsdag", ref).value == date(2026, 11, 24)
+    assert resolve_date("dinsdag om 15 uur", ref).value == date(2026, 11, 24)  # a time, not a day number

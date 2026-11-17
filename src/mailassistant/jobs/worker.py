@@ -8,6 +8,7 @@ from mailassistant.db import queue
 from mailassistant.db.session import session_scope
 from mailassistant.jobs import handlers  # noqa: F401  (registers handlers)
 from mailassistant.classify import handlers as _classify_handlers  # noqa: F401
+from mailassistant.capture import handlers as _capture_handlers  # noqa: F401
 from mailassistant.followups import handlers as _followup_handlers  # noqa: F401
 from mailassistant.gcal import handlers as _gcal_handlers  # noqa: F401
 from mailassistant.mail import handlers as _mail_handlers  # noqa: F401

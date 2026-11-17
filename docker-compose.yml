@@ -50,7 +50,7 @@ services:
     command: ["python", "-m", "mailassistant.web"]
     # The dashboard needs the database only (no Google/IMAP/Fernet secrets): it may later run on a server,
     # see docker-compose.web.yml.
-    secrets: [database_url, web_password_hash, web_tls_cert, web_tls_key]
+    secrets: [database_url, web_password_hash, web_tls_cert, web_tls_key, capture_token]
     depends_on:
       migrate: {condition: service_completed_successfully}
 
@@ -80,3 +80,4 @@ secrets:
   web_tls_cert: {file: ./secrets/web_tls_cert}            # python -m mailassistant.web.makecert
   web_tls_key: {file: ./secrets/web_tls_key}
   ha_token: {file: ./secrets/ha_token}                    # Home Assistant token; may be an empty file
+  capture_token: {file: ./secrets/capture_token}          # bearer token for Home Assistant Assist; empty = off

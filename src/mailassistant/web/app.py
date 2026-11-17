@@ -7,16 +7,18 @@ templates, mail shown as text only.
 """
 from __future__ import annotations
 
+import asyncio
 import ipaddress
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import delete, func, select, text
@@ -25,14 +27,14 @@ from sqlalchemy.orm import Session
 from mailassistant import __version__
 from mailassistant.config import Settings, get_settings
 from mailassistant.db import audit
-from mailassistant.db.models import (AuditLog, Briefing, Classification, Email, EventProposal, Followup,
+from mailassistant.db.models import (AuditLog, Briefing, Capture, Classification, Email, EventProposal, Followup,
                                      FollowupEvent, Job, LlmCall, ProposedAction, ServiceStatus, WebSession)
 from mailassistant.db.session import session_scope, utcnow
 from mailassistant.web.auth import LoginThrottle, new_token, same, token_hash, verify_password
 
 HERE = Path(__file__).parent
 COOKIE, LOGIN_COOKIE, FLASH_COOKIE = "ma_session", "ma_login", "ma_flash"
-PUBLIC = ("/login", "/healthz", "/static/")
+PUBLIC = ("/login", "/healthz", "/static/", "/api/")   # /api/ checks its own bearer token
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; form-action 'self'; "
        "frame-ancestors 'none'; base-uri 'none'; object-src 'none'")
 CATEGORIES = ["personal", "work", "newsletter", "automated_notification", "marketing", "invitation",
@@ -44,6 +46,8 @@ templates = Jinja2Templates(directory=HERE / "templates")  # autoescape on for .
 app.state.settings = None       # tests inject Settings
 app.state.sessionmaker = None   # tests inject a sessionmaker bound to the test database
 throttle = LoginThrottle()
+api_bad_token = LoginThrottle(limit=5, window=900.0)
+api_rate = LoginThrottle(limit=30, window=600.0)   # used as a request counter
 
 
 def settings() -> Settings:
@@ -319,6 +323,8 @@ def followup_action(request: Request, fid: int, action: str):
                 except ValueError:
                     return redirect(f"/followups/{fid}", "Enter a date.")
                 service.set_deadline(d, fid, day, s)
+            elif action == "edit":
+                service.edit_action(d, fid, form_value(request, "text"))
             elif (fn := _fu_action(action)) is not None:
                 fn(d, fid)
             else:
@@ -424,6 +430,126 @@ def mail_correct(request: Request, email_id: int):
             raise HTTPException(404)
         apply_user_correction(d, email_id, cat, note="corrected in dashboard")
     return redirect(back if back.startswith("/mail") else "/mail", f"Mail {email_id} is now '{cat}'.")
+
+
+# ------------------------------------------------------------------ captures: things you add yourself
+KINDS = {"auto": "Laat het bepalen", "event": "Afspraak", "followup": "Follow-up"}
+
+
+@app.get("/capture", response_class=HTMLResponse)
+def capture_form(request: Request):
+    with db() as d:
+        recent = d.execute(select(Capture, Email).join(Email, Email.id == Capture.email_id)
+                           .order_by(Capture.id.desc()).limit(15)).all()
+    return render(request, "capture.html", recent=recent, kinds=KINDS, cap=None, email=None)
+
+
+@app.post("/capture")
+def capture_create(request: Request):
+    from mailassistant.capture.service import CaptureError, create_capture
+
+    try:
+        with db() as d:
+            cap = create_capture(d, form_value(request, "text"), form_value(request, "kind", "auto"), "dashboard",
+                                 settings())
+            cid = cap.id
+    except CaptureError as e:
+        return redirect("/capture", f"Not possible: {e}")
+    return redirect(f"/capture/{cid}")
+
+
+@app.get("/capture/{cid}", response_class=HTMLResponse)
+def capture_detail(request: Request, cid: int):
+    from mailassistant.capture.speech import speech
+
+    with db() as d:
+        cap = d.get(Capture, cid)
+        if cap is None:
+            raise HTTPException(404)
+        email = d.get(Email, cap.email_id)
+    return render(request, "capture.html", cap=cap, email=email, kinds=KINDS, recent=[],
+                  summary=speech(cap.status, cap.result or {}, settings().timezone))
+
+
+@app.post("/api/capture")
+async def api_capture(request: Request):
+    """For Home Assistant Assist: {"text": "...", "kind": "event|followup|auto"} with a bearer token.
+    Waits briefly for the worker and answers with a sentence to read back (built by code, not the model)."""
+    from mailassistant.capture.service import CaptureError, create_capture
+    from mailassistant.capture.speech import speech
+
+    s = settings()
+    who = request.client.host if request.client else "?"
+    expected = s.capture_token.get_secret_value().strip() if s.capture_token else ""
+    if not expected:
+        return JSONResponse({"error": "capture API disabled (secrets/capture_token is empty)"}, status_code=404)
+    if api_bad_token.blocked(who):
+        return JSONResponse({"error": "too many wrong tokens; try again later"}, status_code=429)
+    sent = request.headers.get("authorization", "")
+    if not same(sent.removeprefix("Bearer ").strip() if sent.startswith("Bearer ") else "", expected):
+        api_bad_token.failed(who)
+        with db() as d:
+            audit.record(d, actor="system", action="capture_api_refused", detail=f"wrong token from {who}")
+        return JSONResponse({"error": "wrong token"}, status_code=401)
+    if api_rate.blocked(who):
+        return JSONResponse({"error": "too many requests"}, status_code=429)
+    api_rate.failed(who)
+    raw = await request.body()
+    if len(raw) > 16_000:
+        return JSONResponse({"error": "too large"}, status_code=413)
+    try:
+        body = json.loads(raw or b"{}")
+        text_in, kind = str(body.get("text", "")), str(body.get("kind") or "auto")
+    except (ValueError, AttributeError):
+        return JSONResponse({"error": "send JSON: {\"text\": ..., \"kind\": \"event|followup|auto\"}"}, status_code=400)
+    try:
+        with db() as d:
+            cid = create_capture(d, text_in, kind, "assist", s).id
+    except CaptureError as e:
+        return JSONResponse({"error": str(e), "speech": "Dat lukte niet: ik hoorde geen tekst."}, status_code=400)
+    deadline = asyncio.get_running_loop().time() + max(0.0, s.capture_wait_seconds)
+    status, result = "queued", {}
+    while True:
+        with db() as d:
+            cap = d.get(Capture, cid)
+            status, result = cap.status, dict(cap.result or {})
+        if status != "queued" or asyncio.get_running_loop().time() >= deadline:
+            break
+        await asyncio.sleep(0.5)
+    return JSONResponse({"id": cid, "status": status, "speech": speech(status, result, s.timezone),
+                         "events": [e["id"] for e in result.get("events", [])],
+                         "followups": [f["id"] for f in result.get("followups", [])]}, status_code=202)
+
+
+# ------------------------------------------------------------------ edit before approving
+@app.get("/calendar/{pid}/edit", response_class=HTMLResponse)
+def proposal_edit_form(request: Request, pid: int):
+    with db() as d:
+        p = d.get(EventProposal, pid)
+        if p is None:
+            raise HTTPException(404)
+    z = ZoneInfo(p.tz_name or settings().timezone)
+    return render(request, "proposal_edit.html", p=p, day=p.start_at.astimezone(z).date().isoformat(),
+                  start=p.start_at.astimezone(z).strftime("%H:%M"), end=p.end_at.astimezone(z).strftime("%H:%M"))
+
+
+@app.post("/calendar/{pid}/edit")
+def proposal_edit(request: Request, pid: int):
+    from mailassistant.gcal.review import ReviewError, edit_proposal
+
+    def t(v: str):
+        return time.fromisoformat(v) if v else None
+    try:
+        day = date.fromisoformat(form_value(request, "day"))
+        with db() as d:
+            edit_proposal(d, pid, settings(), title=form_value(request, "title"), day=day,
+                          all_day=form_value(request, "all_day") == "1", start_time=t(form_value(request, "start")),
+                          end_time=t(form_value(request, "end")), location=form_value(request, "location"))
+    except ValueError:
+        return redirect(f"/calendar/{pid}/edit", "Check the date and times.")
+    except ReviewError as e:
+        return redirect(f"/calendar/{pid}/edit", f"Not possible: {e}")
+    return redirect("/calendar", f"#{pid} changed. Conflicts are checked again when you approve.")
 
 
 # ------------------------------------------------------------------ status (database only)
