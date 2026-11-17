@@ -434,6 +434,7 @@ def mail_correct(request: Request, email_id: int):
 
 # ------------------------------------------------------------------ captures: things you add yourself
 KINDS = {"auto": "Laat het bepalen", "event": "Afspraak", "followup": "Follow-up"}
+CAPTURE_TOKEN_FILE = "/run/secrets/capture_token"
 
 
 @app.get("/capture", response_class=HTMLResponse)
@@ -471,6 +472,17 @@ def capture_detail(request: Request, cid: int):
                   summary=speech(cap.status, cap.result or {}, settings().timezone))
 
 
+def _capture_token(s: Settings) -> str:
+    """Read the token file on every call, so a new token works without restarting the dashboard."""
+    path = Path(CAPTURE_TOKEN_FILE)
+    if app.state.settings is None and path.is_file():
+        try:
+            return path.read_text(encoding="utf-8").strip()
+        except OSError:
+            return ""
+    return s.capture_token.get_secret_value().strip() if s.capture_token else ""
+
+
 @app.post("/api/capture")
 async def api_capture(request: Request):
     """For Home Assistant Assist: {"text": "...", "kind": "event|followup|auto"} with a bearer token.
@@ -480,7 +492,7 @@ async def api_capture(request: Request):
 
     s = settings()
     who = request.client.host if request.client else "?"
-    expected = s.capture_token.get_secret_value().strip() if s.capture_token else ""
+    expected = _capture_token(s)
     if not expected:
         return JSONResponse({"error": "capture API disabled (secrets/capture_token is empty)"}, status_code=404)
     if api_bad_token.blocked(who):

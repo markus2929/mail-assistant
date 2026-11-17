@@ -44,7 +44,9 @@ openssl rand -hex 32 > secrets/capture_token && chmod 600 secrets/capture_token
 docker compose --profile local-db up -d
 cat secrets/capture_token          # copy for Home Assistant
 ```
-An empty `secrets/capture_token` switches the voice API off.
+An empty `secrets/capture_token` switches the voice API off. A new token takes effect immediately (with versions
+before 18 Nov 2026: `docker compose restart web`). Copy it from *this* folder - a token made in another
+checkout is a different one, and Home Assistant then gets `401`.
 
 ### 2. Home Assistant configuration
 Two pieces: a REST command that calls the assistant (in `configuration.yaml`), and two automations with a
