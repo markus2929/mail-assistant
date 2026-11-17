@@ -17,10 +17,12 @@ x-app: &app
   restart: unless-stopped
   security_opt: ["no-new-privileges:true"]
   cap_drop: [ALL]
+  labels: {com.centurylinklabs.watchtower.enable: "false"}   # update deliberately (git pull + build), not via Watchtower
 
 services:
   db:
     image: postgres:17
+    labels: {com.centurylinklabs.watchtower.enable: "false"}   # update deliberately (git pull + build), not via Watchtower
     environment:
       POSTGRES_USER: mailassistant
       POSTGRES_DB: mailassistant
@@ -39,6 +41,7 @@ services:
       context: .
       dockerfile: docker/bridge.Dockerfile
     image: mailassistant-bridge:dev
+    labels: {com.centurylinklabs.watchtower.enable: "false"}   # update deliberately (git pull + build), not via Watchtower
     volumes: ["bridge:/home/bridge"]     # login, keychain and Bridge's mail cache
     restart: unless-stopped
     security_opt: ["no-new-privileges:true"]
