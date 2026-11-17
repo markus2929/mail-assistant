@@ -1,0 +1,27 @@
+From: Organisator <org@example.nl>
+To: me@example.com
+Subject: Uitnodiging: Projectoverleg
+Date: Wed, 04 Nov 2026 08:00:00 +0100
+Message-ID: <inv-1@example.nl>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="b1"
+
+--b1
+Content-Type: text/plain; charset=utf-8
+
+Je bent uitgenodigd voor Projectoverleg op 12 nov 2026 om 14:00.
+Join: https://zoom.us/j/123456789
+--b1
+Content-Type: text/calendar; charset=utf-8; method=REQUEST; name="invite.ics"
+Content-Disposition: attachment; filename="invite.ics"
+
+BEGIN:VCALENDAR
+METHOD:REQUEST
+BEGIN:VEVENT
+UID:abc-123@example.nl
+DTSTART;TZID=Europe/Amsterdam:20261112T140000
+DTEND;TZID=Europe/Amsterdam:20261112T150000
+SUMMARY:Projectoverleg
+END:VEVENT
+END:VCALENDAR
+--b1--

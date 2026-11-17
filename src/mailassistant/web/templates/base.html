@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+{% block head %}{% endblock %}
+<title>{% block title %}Mail Assistant{% endblock %}</title>
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+{% if csrf %}
+<header class="top">
+  <nav>
+    <a href="/" class="{{ 'on' if path == '/' }}">Briefing</a>
+    <a href="/followups" class="{{ 'on' if path.startswith('/followups') }}">Follow-ups</a>
+    <a href="/calendar" class="{{ 'on' if path.startswith('/calendar') }}">Calendar</a>
+    <a href="/mail" class="{{ 'on' if path.startswith('/mail') }}">Mail</a>
+    <a href="/status" class="{{ 'on' if path.startswith('/status') }}">Status</a>
+  </nav>
+  <form method="post" action="/logout" class="logout">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><button class="link">Log out</button>
+  </form>
+</header>
+{% endif %}
+<main>
+{% if flash %}<p class="flash">{{ flash }}</p>{% endif %}
+{% block main %}{% endblock %}
+</main>
+<footer>Mail Assistant {{ version }} - suggestions only; nothing changes without you.</footer>
+</body>
+</html>

@@ -1,0 +1,19 @@
+From: Leverancier <lev@example.nl>
+To: me@example.com
+Subject: Opzegging
+Date: Fri, 06 Nov 2026 11:00:00 +0100
+Message-ID: <fake-cal-1@example.nl>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="b9"
+
+--b9
+Content-Type: text/plain; charset=utf-8
+
+Zie bijlage.
+--b9
+Content-Type: text/calendar; name="Opzegging.pdf"
+Content-Disposition: attachment; filename="Opzegging.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQKJeLjz9MKNCAwIG9iagoAAQL//iBiaW5hcnkgAAAgZW5kb2JqCg==
+--b9--

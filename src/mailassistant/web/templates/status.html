@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Status{% endblock %}
+{% block main %}
+<h1>Status</h1>
+{% if stale %}<p class="warn">The worker on the desktop has not reported {% if worker_age %}for {{ (worker_age.total_seconds() // 60)|int }} minutes{% else %}yet{% endif %}.
+  The desktop may be off: your decisions are saved and carried out when it is back.</p>{% endif %}
+<table class="list">
+  <thead><tr><th>Component</th><th>State</th><th>Detail</th><th>Checked</th></tr></thead>
+  <tbody>
+  {% for name in ['worker', 'ollama', 'bridge', 'google', 'homeassistant'] %}{% set c = comps.get(name) %}
+  <tr><td>{{ name }}</td>
+      <td>{% if c %}<span class="tag {{ 'ok' if c.ok else 'hot' }}">{{ 'ok' if c.ok else 'problem' }}</span>{% else %}<span class="muted">no report</span>{% endif %}</td>
+      <td class="small">{{ c.detail if c else '' }}</td><td class="small nowrap">{{ c.checked_at|local if c else '' }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p class="muted small">Last briefing: {{ last_briefing or '-' }} · last Home Assistant push: {{ last_push|local if last_push else '-' }}</p>
+<form method="post" action="/status/test-notification"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="secondary">Send test notification</button></form>
+
+<h2>Calendars</h2>
+{% if cals %}
+{% if cals.note %}<p class="warn small">{{ cals.note }}</p>{% endif %}
+<table class="list"><thead><tr><th>Role</th><th>In .env</th><th>Calendar</th><th>Your access</th></tr></thead><tbody>
+{% for role in ["work", "private"] %}{% set r = cals[role] %}{% if r %}
+<tr><td>{{ role }}</td><td>{{ r.value }}</td>
+  <td>{% if r.error %}<span class="tag hot">problem</span> <span class="small">{{ r.error }}</span>{% else %}{{ r.name }}<div class="muted small">{{ r.id }}</div>{% endif %}</td>
+  <td class="small">{{ r.access_role or '-' }}</td></tr>
+{% endif %}{% endfor %}
+{% for r in cals.extras %}<tr><td>conflicts</td><td>{{ r.value }}</td><td>{% if r.error %}<span class="tag hot">problem</span> <span class="small">{{ r.error }}</span>{% else %}{{ r.name }}{% endif %}</td><td class="small">{{ r.access_role or '-' }}</td></tr>{% endfor %}
+</tbody></table>
+<p class="muted small">Checked for conflicts: {% for i in cals.read_ids %}{{ cals.read_names.get(i, i) }}{{ ', ' if not loop.last }}{% endfor %} · resolved {{ cals.checked_at|local }}</p>
+{% else %}<p class="muted">Not resolved yet - the worker does this at the next calendar sync (every 15 minutes).</p>{% endif %}
+
+<h2>Jobs (active and last 24 h)</h2>
+<table class="list"><thead><tr><th>Type</th><th>Status</th><th>Count</th></tr></thead><tbody>
+{% for t, st, n in jobs %}<tr><td>{{ t }}</td><td>{{ st }}</td><td>{{ n }}</td></tr>{% endfor %}
+</tbody></table>
+{% if dead %}<h2>Failed jobs (3 days)</h2>
+<table class="list"><tbody>{% for t, err, at in dead %}<tr><td>{{ t }}</td><td class="small">{{ error_class(err) }}</td><td class="small nowrap">{{ at|local }}</td></tr>{% endfor %}</tbody></table>{% endif %}
+
+<h2>Model calls (24 h)</h2>
+<table class="list"><thead><tr><th>Task</th><th>Calls</th><th>Invalid</th><th>Avg</th></tr></thead><tbody>
+{% for task, n, bad, ms in llm %}<tr><td>{{ task }}</td><td>{{ n }}</td><td>{{ bad }}</td><td>{{ ((ms or 0) / 1000)|round(1) }} s</td></tr>{% endfor %}
+</tbody></table>
+{% endblock %}

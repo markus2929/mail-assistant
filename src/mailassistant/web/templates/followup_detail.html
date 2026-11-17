@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% from "_fu_row.html" import who %}
+{% block title %}Follow-up #{{ f.id }}{% endblock %}
+{% block main %}
+<p><a href="/followups">← Follow-ups</a></p>
+<h1>#{{ f.id }} {{ who(f) }} {{ f.action_text }}</h1>
+<dl class="facts">
+  <dt>Status</dt><dd>{{ f.status }} <span class="muted">(confidence {{ '%.2f'|format(f.confidence or 0) }})</span></dd>
+  <dt>Counterparty</dt><dd>{{ f.counterparty or '?' }} <span class="muted">{{ (f.people or [])|join(', ') }}</span></dd>
+  <dt>Deadline</dt><dd>{{ f.deadline_at|local if f.deadline_at else 'none stated' }}</dd>
+  <dt>Reminder</dt><dd>{{ f.remind_at|local }} <span class="muted">({{ f.remind_basis }})</span></dd>
+  <dt>Evidence</dt><dd><blockquote>{{ f.evidence_quote }}</blockquote></dd>
+  <dt>From mail</dt><dd>{{ 'sent by you to' if src.direction == 'out' else 'received from' }}
+      {{ ((src.to_addrs or [])|join(', ')) if src.direction == 'out' else src.from_addr }} — “{{ src.subject or '(no subject)' }}”, {{ src.sent_at|local }}</dd>
+  {% if f.explanation %}<dt>Model's reason</dt><dd class="muted">{{ f.explanation }}</dd>{% endif %}
+  {% for n in f.notes or [] %}<dt>Note</dt><dd class="muted">{{ n }}</dd>{% endfor %}
+</dl>
+
+{% if closure %}
+<section class="box">
+  <h2>Proposed closure</h2>
+  <p>Mail {{ 'you sent' if closure.direction == 'out' else 'from ' ~ closure.from_addr }} — “{{ closure.subject or '(no subject)' }}”, {{ closure.sent_at|local }}:</p>
+  <blockquote>{{ f.closure_quote }}</blockquote>
+  <div class="row">
+    <form method="post" action="/followups/{{ f.id }}/close"><input type="hidden" name="csrf" value="{{ csrf }}"><button>Accept: done</button></form>
+    <form method="post" action="/followups/{{ f.id }}/keep"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="secondary">Keep open</button></form>
+  </div>
+</section>
+{% endif %}
+
+{% if f.status in ('proposed', 'open', 'waiting') %}
+<section class="box">
+  <h2>Actions</h2>
+  <div class="row">
+    {% if f.status == 'proposed' %}<form method="post" action="/followups/{{ f.id }}/confirm"><input type="hidden" name="csrf" value="{{ csrf }}"><button>Confirm</button></form>{% endif %}
+    <form method="post" action="/followups/{{ f.id }}/done"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="secondary">Done</button></form>
+    <form method="post" action="/followups/{{ f.id }}/reject"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="danger">Reject</button></form>
+  </div>
+  <div class="row">
+    {% if f.status in ('open', 'waiting') %}
+    <form method="post" action="/followups/{{ f.id }}/snooze"><input type="hidden" name="csrf" value="{{ csrf }}">
+      <label>Snooze <input type="number" name="days" value="2" min="1" max="60" class="short"> working days</label> <button class="secondary">Snooze</button></form>
+    {% endif %}
+    <form method="post" action="/followups/{{ f.id }}/deadline"><input type="hidden" name="csrf" value="{{ csrf }}">
+      <label>Deadline <input type="date" name="day" required></label> <button class="secondary">Set</button></form>
+  </div>
+</section>
+{% endif %}
+
+<h2>History</h2>
+<ul class="plain small">
+{% for ev in events %}<li>{{ ev.created_at|local }} — {{ ev.actor }}: {{ ev.from_status or '–' }} → {{ ev.to_status }} {{ ev.note or '' }}</li>{% endfor %}
+</ul>
+{% endblock %}

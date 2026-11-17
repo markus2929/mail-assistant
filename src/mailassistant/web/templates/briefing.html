@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% from "_fu_row.html" import who %}
+{% block title %}Briefing {{ b.date }}{% endblock %}
+{% block main %}
+<h1>Briefing {{ b.date }}</h1>
+<div class="cards">
+  <a class="card {{ 'hot' if b.counts.overdue }}" href="/followups?status=open"><b>{{ b.counts.overdue }}</b> overdue</a>
+  <a class="card" href="/followups?status=open"><b>{{ b.counts.due_today }}</b> due today</a>
+  <a class="card" href="/followups?status=closure"><b>{{ b.counts.closure_proposals }}</b> closures to check</a>
+  <a class="card" href="/followups?status=proposed"><b>{{ b.followup_proposals|length }}</b> new follow-ups</a>
+  <a class="card" href="/calendar"><b>{{ b.event_proposals|length }}</b> calendar proposals</a>
+</div>
+
+<h2>Today in the calendar</h2>
+{% if b.calendar %}<ul class="plain">
+{% for c in b.calendar %}<li><span class="time">{{ 'all day' if c.all_day else (c.start|local('%H:%M')) ~ '–' ~ (c.end|local('%H:%M')) }}</span>
+  {{ c.summary or '(no title)' }}{% if c.location %} <span class="muted">@ {{ c.location }}</span>{% endif %}{% if c.tentative %} <span class="tag">tentative</span>{% endif %}</li>
+{% endfor %}</ul>{% else %}<p class="muted">Nothing.</p>{% endif %}
+
+{% for key, title in [("overdue", "Overdue"), ("due_today", "Due today"), ("closure_proposals", "Proposed closures"), ("followup_proposals", "New follow-up proposals")] %}
+<h2>{{ title }}</h2>
+{% if b[key] %}<ul class="plain">
+{% for f in b[key] %}<li>{{ who(f) }} <a href="/followups/{{ f.id }}">#{{ f.id }}</a> {{ f.counterparty or '?' }}: {{ f.action }}
+  {% if f.deadline_at %}<span class="muted">deadline {{ f.deadline_at|local }}</span>{% endif %}</li>
+{% endfor %}</ul>{% else %}<p class="muted">None.</p>{% endif %}
+{% endfor %}
+
+<h2>Calendar proposals</h2>
+{% if b.event_proposals %}<ul class="plain">
+{% for p in b.event_proposals %}<li><span class="time">{{ p.start|local('%a %d %b' if p.all_day else '%a %d %b %H:%M') }}</span>
+  {{ p.title or '(no title)' }}{% if p.conflict %} <span class="tag hot">conflict</span>{% endif %}</li>
+{% endfor %}</ul>{% else %}<p class="muted">None.</p>{% endif %}
+<p class="muted small">Built {{ b.generated_at|local }}.</p>
+{% endblock %}

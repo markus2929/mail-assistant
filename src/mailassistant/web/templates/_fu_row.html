@@ -1,0 +1,3 @@
+{% macro who(f) -%}
+{% if f.direction == "I_OWE" %}<span class="tag owe">I owe</span>{% else %}<span class="tag wait">waiting for</span>{% endif %}
+{%- endmacro %}

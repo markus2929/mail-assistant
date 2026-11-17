@@ -1,0 +1,19 @@
+From: Leverancier <lev@example.nl>
+To: me@example.com
+Subject: Offerte
+Date: Fri, 06 Nov 2026 09:00:00 +0100
+Message-ID: <pdf-1@example.nl>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="b2"
+
+--b2
+Content-Type: text/plain; charset=utf-8
+
+Zie bijlage.
+--b2
+Content-Type: application/pdf; name="offerte.pdf"
+Content-Disposition: attachment; filename="offerte.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQKJWZha2UK
+--b2--

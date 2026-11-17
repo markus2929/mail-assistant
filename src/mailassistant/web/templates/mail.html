@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Mail{% endblock %}
+{% block main %}
+<h1>Classified mail <span class="muted small">last {{ days }} days</span></h1>
+<nav class="tabs">
+  {% for c in categories %}<a href="/mail?category={{ c }}&days={{ days }}" class="{{ 'on' if category == c }}">{{ c }} ({{ counts.get(c, 0) }})</a>{% endfor %}
+  <a href="/mail?category=all&days={{ days }}" class="{{ 'on' if category == 'all' }}">all</a>
+  <span class="sep"></span>
+  {% for n in (7, 14, 30, 60) %}<a href="/mail?category={{ category }}&days={{ n }}" class="{{ 'on' if days == n }}">{{ n }}d</a>{% endfor %}
+</nav>
+{% if rows %}
+<table class="list">
+  <thead><tr><th>Date</th><th>Mail</th><th>Classification</th><th>Correct</th></tr></thead>
+  <tbody>
+  {% for e, c in rows %}
+  <tr>
+    <td class="nowrap">{{ (e.sent_at or e.received_at)|local('%d %b %H:%M') }}</td>
+    <td><b>{{ e.subject or '(no subject)' }}</b><div class="muted small">{{ e.from_name or '' }} &lt;{{ e.from_addr }}&gt;</div></td>
+    <td><span class="tag">{{ c.category }}</span> {{ c.importance }} <span class="muted">{{ '%.2f'|format(c.confidence or 0) }} · {{ c.source }}</span>
+      {% if c.injection_flag %}<span class="tag hot">injection?</span>{% endif %}
+      {% for fl in c.safety_flags or [] %}<span class="tag">{{ fl }}</span>{% endfor %}
+      {% if c.reasons %}<div class="muted small">{{ c.reasons|truncate(200) }}</div>{% endif %}
+      {% if actions.get(e.id) %}<div class="small muted">suggested: {{ actions[e.id]|join(', ') }} (not applied)</div>{% endif %}
+    </td>
+    <td><form method="post" action="/mail/{{ e.id }}/category" class="row">
+      <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="back" value="/mail?category={{ category }}&days={{ days }}">
+      <select name="category" aria-label="category for mail {{ e.id }}">{% for k in categories %}<option value="{{ k }}" {{ 'selected' if k == c.category }}>{{ k }}</option>{% endfor %}</select>
+      <button class="secondary">Save</button></form></td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="muted">Nothing here.</p>{% endif %}
+{% endblock %}

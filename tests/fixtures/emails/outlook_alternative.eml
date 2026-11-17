@@ -1,0 +1,23 @@
+From: Collega <collega@example.nl>
+To: me@example.com
+Subject: Afspraak
+Date: Fri, 06 Nov 2026 10:00:00 +0100
+Message-ID: <alt-1@example.nl>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="b3"
+
+--b3
+Content-Type: text/plain; charset=utf-8
+
+Zie de uitnodiging.
+--b3
+Content-Type: text/calendar; charset=utf-8; method=REQUEST
+
+BEGIN:VCALENDAR
+METHOD:REQUEST
+BEGIN:VEVENT
+UID:alt-uid@example.nl
+SUMMARY:Afspraak
+END:VEVENT
+END:VCALENDAR
+--b3--

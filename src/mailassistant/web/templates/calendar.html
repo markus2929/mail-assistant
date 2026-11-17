@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block head %}{% if pending %}<meta http-equiv="refresh" content="4">{% endif %}{% endblock %}
+{% block title %}Calendar proposals{% endblock %}
+{% block main %}
+<h1>Calendar proposals</h1>
+<nav class="tabs">
+  <a href="/calendar" class="{{ 'on' if show == 'open' }}">Open</a>
+  <a href="/calendar?show=decided" class="{{ 'on' if show != 'open' }}">Created / rejected</a>
+</nav>
+{% if private_problem %}<p class="warn">The private calendar from GOOGLE_PRIVATE_CALENDAR cannot be used yet - see <a href="/status">Status</a>. Approving goes to {{ labels.work }} meanwhile.</p>{% endif %}
+{% if pending %}<p class="info">An event is being created by the worker on the desktop; this page refreshes by itself.</p>{% endif %}
+{% if rows %}
+{% if show == 'open' %}
+<form method="post" action="/calendar/bulk" id="bulk">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <div class="bulk">
+    <label class="selall"><input type="checkbox" data-select-all> all</label>
+    <button name="action" value="reject" class="danger">Reject selected</button>
+    <span class="muted small">Approving is one at a time: each creates a real event after a fresh conflict check.</span>
+  </div>
+</form>
+{% endif %}
+<table class="list">
+  <thead><tr>{% if show == 'open' %}<th></th>{% endif %}<th>#</th><th>When</th><th>What</th><th>Status</th></tr></thead>
+  <tbody>
+  {% for p, e in rows %}
+  {% set overlaps = (p.conflicts or [])|selectattr('type', 'equalto', 'overlap')|list %}
+  <tr>
+    {% if show == 'open' %}<td><input type="checkbox" name="ids" value="{{ p.id }}" form="bulk" aria-label="select #{{ p.id }}"></td>{% endif %}
+    <td>#{{ p.id }}</td>
+    <td>{{ p.start_at|local('%a %d %b %Y' if p.all_day else '%a %d %b %Y %H:%M') }}{% if not p.all_day %}–{{ p.end_at|local('%H:%M') }}{% endif %}</td>
+    <td><b>{{ p.title or '(no title)' }}</b> <span class="tag">{{ p.kind }}</span>
+      {% if p.location %}<div class="small">@ {{ p.location }}</div>{% endif %}
+      <div class="muted small">from {{ e.from_addr }} — “{{ e.subject or '(no subject)' }}”</div>
+      {% if p.evidence_quote %}<div class="muted small">“{{ p.evidence_quote|truncate(160) }}”</div>{% endif %}
+      {% for c in p.conflicts or [] %}<div class="small"><span class="tag {{ 'hot' if c.type == 'overlap' }}">{{ c.type }}</span> {{ c.summary or '' }} {{ c.start|local if c.start }}</div>{% endfor %}
+      {% for n in p.notes or [] %}<div class="muted small">note: {{ n }}</div>{% endfor %}
+    </td>
+    <td>{{ p.status }}{% if p.status == 'created' and p.target_calendar %} <span class="tag">{{ p.target_calendar }}</span>{% endif %}
+      {% if p.approval_result %}<div class="small {{ 'hot' if p.approval_result.startswith(('failed', 'conflicts')) }}">{{ p.approval_result }}</div>{% endif %}
+      {% if show == 'open' and p.kind != 'mention' %}
+        {% if approval_pending(p) %}<div class="small">creating…</div>
+        {% else %}
+        {% set conflict = overlaps or (p.approval_result or '').startswith('conflicts') %}
+        {% set sug, why = suggest[p.id] %}
+        <form method="post" action="/calendar/{{ p.id }}/approve" class="approve"><input type="hidden" name="csrf" value="{{ csrf }}">
+          {% if conflict %}<input type="hidden" name="accept_conflicts" value="1"><div class="small hot">despite conflict:</div>{% endif %}
+          {% if private_enabled %}
+            {% for cal in ["work", "private"] %}
+            <button name="calendar" value="{{ cal }}" class="{{ ('warnbtn' if conflict else '') if cal == sug else 'secondary' }}">Approve → {{ labels[cal] }}</button>
+            {% endfor %}
+            {% if why %}<div class="muted small">suggested: {{ sug }} - {{ why }}</div>{% endif %}
+          {% else %}
+            <button name="calendar" value="work" class="{{ 'warnbtn' if conflict }}">{{ 'Approve despite conflict' if conflict else 'Approve' }}</button>
+          {% endif %}
+        </form>
+        {% endif %}
+      {% elif p.kind == 'mention' %}<div class="muted small">mention only - cannot be created</div>{% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="muted">Nothing here.</p>{% endif %}
+{% endblock %}

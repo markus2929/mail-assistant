@@ -1,0 +1,10 @@
+From: a\x00b <nul@example.nl>
+To: me@example.com
+Subject: Nul
+Date: Fri, 06 Nov 2026 12:00:00 +0100
+Message-ID: <nul-1@example.nl>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: base64
+
+SGFsbG8AIHdlcmVsZAAh

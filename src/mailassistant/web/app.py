@@ -1,0 +1,470 @@
+"""Dashboard (Phase 6). Talks to the database ONLY - it never calls Google, Ollama or Bridge, so it can run
+on another host. Anything that needs those services is queued as a job for the worker on the desktop.
+
+Security: login (one user, scrypt hash), server-side sessions (only a token hash stored), CSRF token on
+every POST, strict CSP without inline script, Host header check, no state change on GET, autoescaped
+templates, mail shown as text only.
+"""
+from __future__ import annotations
+
+import ipaddress
+from collections.abc import Iterator
+from contextlib import contextmanager
+from datetime import date, datetime, timedelta
+from pathlib import Path
+from urllib.parse import parse_qs, quote, unquote
+from zoneinfo import ZoneInfo
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from sqlalchemy import delete, func, select, text
+from sqlalchemy.orm import Session
+
+from mailassistant import __version__
+from mailassistant.config import Settings, get_settings
+from mailassistant.db import audit
+from mailassistant.db.models import (AuditLog, Briefing, Classification, Email, EventProposal, Followup,
+                                     FollowupEvent, Job, LlmCall, ProposedAction, ServiceStatus, WebSession)
+from mailassistant.db.session import session_scope, utcnow
+from mailassistant.web.auth import LoginThrottle, new_token, same, token_hash, verify_password
+
+HERE = Path(__file__).parent
+COOKIE, LOGIN_COOKIE, FLASH_COOKIE = "ma_session", "ma_login", "ma_flash"
+PUBLIC = ("/login", "/healthz", "/static/")
+CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; form-action 'self'; "
+       "frame-ancestors 'none'; base-uri 'none'; object-src 'none'")
+CATEGORIES = ["personal", "work", "newsletter", "automated_notification", "marketing", "invitation",
+              "spam_suspicious", "manual_review"]
+
+app = FastAPI(title="Mail Assistant", version=__version__, docs_url=None, redoc_url=None, openapi_url=None)
+app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
+templates = Jinja2Templates(directory=HERE / "templates")  # autoescape on for .html
+app.state.settings = None       # tests inject Settings
+app.state.sessionmaker = None   # tests inject a sessionmaker bound to the test database
+throttle = LoginThrottle()
+
+
+def settings() -> Settings:
+    return app.state.settings or get_settings()
+
+
+@contextmanager
+def db() -> Iterator[Session]:
+    if app.state.sessionmaker is None:
+        with session_scope() as s:
+            yield s
+        return
+    s = app.state.sessionmaker()
+    try:
+        yield s
+        s.commit()
+    except Exception:
+        s.rollback()
+        raise
+    finally:
+        s.close()
+
+
+# ------------------------------------------------------------------ template helpers
+def _local(value, fmt: str = "%a %d %b %H:%M") -> str:
+    if not value:
+        return "-"
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value)
+    return value.astimezone(ZoneInfo(settings().timezone)).strftime(fmt)
+
+
+templates.env.filters["local"] = _local
+templates.env.globals["version"] = __version__
+
+
+def render(request: Request, name: str, **ctx) -> HTMLResponse:
+    flash = request.cookies.get(FLASH_COOKIE)
+    resp = templates.TemplateResponse(request, name, {
+        "csrf": getattr(request.state, "csrf", ""), "flash": unquote(flash) if flash else None,
+        "path": request.url.path, **ctx})
+    if flash:
+        resp.delete_cookie(FLASH_COOKIE, path="/")
+    return resp
+
+
+def redirect(url: str, flash: str | None = None) -> RedirectResponse:
+    resp = RedirectResponse(url, status_code=303)
+    if flash:
+        resp.set_cookie(FLASH_COOKIE, quote(flash[:400]), max_age=60, httponly=True, secure=True,
+                        samesite="strict", path="/")
+    return resp
+
+
+def _set_cookie(resp: Response, name: str, value: str, max_age: int) -> None:
+    resp.set_cookie(name, value, max_age=max_age, httponly=True, secure=True, samesite="strict", path="/")
+
+
+# ------------------------------------------------------------------ middleware: host, auth, csrf, headers
+def _host_allowed(host_header: str, allowed: list[str]) -> bool:
+    host = (host_header or "").strip().lower()
+    if host.startswith("["):              # [::1]:8443
+        host = host[1:host.find("]")]
+    elif host.count(":") == 1:
+        host = host.split(":")[0]
+    return host in {a.lower() for a in allowed}
+
+
+async def _form(request: Request) -> dict[str, list[str]]:
+    body = (await request.body()).decode("utf-8", "replace")
+    return parse_qs(body, keep_blank_values=True, max_num_fields=500)
+
+
+@app.middleware("http")
+async def guard(request: Request, call_next):
+    s = settings()
+    if not _host_allowed(request.headers.get("host", ""), s.web_allowed_hosts):
+        return PlainTextResponse("unknown host name (add it to WEB_ALLOWED_HOSTS)", status_code=400)
+    path = request.url.path
+    if not path.startswith(PUBLIC):
+        token = request.cookies.get(COOKIE)
+        ws = _load_session(token) if token else None
+        if ws is None:
+            if request.method == "GET":
+                return redirect("/login")
+            return PlainTextResponse("not logged in", status_code=403)
+        request.state.session_hash, request.state.csrf = ws
+        if request.method == "POST":
+            form = await _form(request)
+            request.state.form = form
+            sent = (form.get("csrf") or [""])[0] or request.headers.get("x-csrf-token", "")
+            if not same(sent, request.state.csrf):
+                return PlainTextResponse("invalid or missing CSRF token; reload the page", status_code=403)
+    resp = await call_next(request)
+    resp.headers["Content-Security-Policy"] = CSP
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["Referrer-Policy"] = "no-referrer"
+    resp.headers["X-Frame-Options"] = "DENY"
+    resp.headers["Cache-Control"] = "no-store"
+    if s.web_tls != "off":
+        resp.headers["Strict-Transport-Security"] = "max-age=31536000"
+    return resp
+
+
+def _load_session(token: str) -> tuple[str, str] | None:
+    s = settings()
+    now = utcnow()
+    with db() as d:
+        ws = d.get(WebSession, token_hash(token))
+        if ws is None:
+            return None
+        if ws.expires_at < now or ws.last_seen_at < now - timedelta(hours=s.web_session_idle_hours):
+            d.delete(ws)
+            return None
+        if ws.last_seen_at < now - timedelta(minutes=1):
+            ws.last_seen_at = now
+        return ws.id_hash, ws.csrf_token
+
+
+def form_value(request: Request, key: str, default: str = "") -> str:
+    return ((getattr(request.state, "form", {}) or {}).get(key) or [default])[0]
+
+
+def form_ids(request: Request) -> list[int]:
+    return [int(x) for x in (getattr(request.state, "form", {}) or {}).get("ids", []) if x.isdigit()]
+
+
+# ------------------------------------------------------------------ login / logout / health
+@app.get("/healthz")
+def healthz() -> dict:
+    try:
+        with db() as d:
+            d.execute(text("SELECT 1"))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=503, detail="database unavailable") from e
+    return {"status": "ok", "version": __version__}
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_form(request: Request):
+    pre = new_token()
+    resp = render(request, "login.html", login_csrf=pre,
+                  configured=settings().web_password_hash is not None)
+    _set_cookie(resp, LOGIN_COOKIE, pre, 900)
+    return resp
+
+
+@app.post("/login")
+async def login(request: Request):
+    form = await _form(request)
+    who = request.client.host if request.client else "?"
+    if not same((form.get("csrf") or [""])[0], request.cookies.get(LOGIN_COOKIE)):
+        return redirect("/login", "The login form expired; please try again.")
+    if throttle.blocked(who):
+        return PlainTextResponse("too many failed logins; try again in 15 minutes", status_code=429)
+    s = settings()
+    stored = s.web_password_hash.get_secret_value() if s.web_password_hash else None
+    if not verify_password((form.get("password") or [""])[0], stored):
+        throttle.failed(who)
+        with db() as d:
+            audit.record(d, actor="user", action="web_login_failed", detail=f"from {who}")
+        return redirect("/login", "Wrong password.")
+    throttle.succeeded(who)
+    token, now = new_token(), utcnow()
+    with db() as d:
+        d.execute(delete(WebSession).where(WebSession.expires_at < now))
+        d.add(WebSession(id_hash=token_hash(token), csrf_token=new_token(), created_at=now, last_seen_at=now,
+                         expires_at=now + timedelta(days=s.web_session_max_days),
+                         user_agent=(request.headers.get("user-agent") or "")[:200]))
+        audit.record(d, actor="user", action="web_login", detail=f"from {who}")
+    resp = redirect("/")
+    _set_cookie(resp, COOKIE, token, s.web_session_max_days * 86400)
+    resp.delete_cookie(LOGIN_COOKIE, path="/")
+    return resp
+
+
+@app.post("/logout")
+def logout(request: Request):
+    with db() as d:
+        d.execute(delete(WebSession).where(WebSession.id_hash == request.state.session_hash))
+    resp = redirect("/login", "Logged out.")
+    resp.delete_cookie(COOKIE, path="/")
+    return resp
+
+
+# ------------------------------------------------------------------ briefing
+@app.get("/", response_class=HTMLResponse)
+def home(request: Request):
+    from mailassistant.followups.briefing import build_briefing
+
+    s = settings()
+    today = utcnow().astimezone(ZoneInfo(s.timezone)).date()
+    with db() as d:
+        content = build_briefing(d, today, s.timezone, rebuild=True).content
+    return render(request, "briefing.html", b=content)
+
+
+# ------------------------------------------------------------------ follow-ups
+FU_STATUSES = {"active": ("proposed", "open", "waiting"), "proposed": ("proposed",), "open": ("open", "waiting"),
+               "closure": ("proposed", "open", "waiting"), "done": ("completed", "cancelled")}
+
+
+@app.get("/followups", response_class=HTMLResponse)
+def followups(request: Request, status: str = "active", direction: str = ""):
+    statuses = FU_STATUSES.get(status, FU_STATUSES["active"])
+    with db() as d:
+        q = select(Followup, Email).join(Email, Email.id == Followup.email_id).where(Followup.status.in_(statuses))
+        if status == "closure":
+            q = q.where(Followup.closure_email_id.is_not(None))
+        if direction in ("I_OWE", "THEY_OWE"):
+            q = q.where(Followup.direction == direction)
+        order = Followup.updated_at.desc() if status == "done" else Followup.remind_at
+        rows = d.execute(q.order_by(order).limit(300)).all()
+        counts = dict(d.execute(select(Followup.status, func.count()).group_by(Followup.status)).all())
+    return render(request, "followups.html", rows=rows, status=status, direction=direction, counts=counts,
+                  now=utcnow())
+
+
+def _fu_action(name: str):
+    from mailassistant.followups import service
+    return {"confirm": service.confirm, "reject": service.reject, "done": service.mark_done,
+            "close": service.accept_closure, "keep": service.dismiss_closure}.get(name)
+
+
+@app.post("/followups/bulk")
+def followups_bulk(request: Request):
+    from mailassistant.followups.service import FollowupError
+
+    action, ids = form_value(request, "action"), form_ids(request)
+    fn = _fu_action(action)
+    back = form_value(request, "back", "/followups")
+    if fn is None or not ids:
+        return redirect(back if back.startswith("/followups") else "/followups", "Select one or more items first.")
+    ok, errors = [], []
+    with db() as d:
+        for fid in ids:
+            try:
+                with d.begin_nested():
+                    fn(d, fid)
+                ok.append(f"#{fid}")
+            except FollowupError as e:
+                errors.append(f"#{fid}: {e}")
+    msg = f"{action}: {', '.join(ok) or 'nothing'}" + (f". Not possible - {'; '.join(errors)}" if errors else "")
+    return redirect(back if back.startswith("/followups") else "/followups", msg)
+
+
+@app.get("/followups/{fid}", response_class=HTMLResponse)
+def followup_detail(request: Request, fid: int):
+    with db() as d:
+        f = d.get(Followup, fid)
+        if f is None:
+            raise HTTPException(404)
+        src = d.get(Email, f.email_id)
+        closure = d.get(Email, f.closure_email_id) if f.closure_email_id else None
+        events = d.scalars(select(FollowupEvent).where(FollowupEvent.followup_id == fid)
+                           .order_by(FollowupEvent.id)).all()
+    return render(request, "followup_detail.html", f=f, src=src, closure=closure, events=events)
+
+
+@app.post("/followups/{fid}/{action}")
+def followup_action(request: Request, fid: int, action: str):
+    from mailassistant.followups import service
+
+    s = settings()
+    try:
+        with db() as d:
+            if action == "snooze":
+                days = form_value(request, "days", "2")
+                service.snooze(d, fid, int(days) if days.isdigit() else 2, s)
+            elif action == "deadline":
+                try:
+                    day = date.fromisoformat(form_value(request, "day"))
+                except ValueError:
+                    return redirect(f"/followups/{fid}", "Enter a date.")
+                service.set_deadline(d, fid, day, s)
+            elif (fn := _fu_action(action)) is not None:
+                fn(d, fid)
+            else:
+                raise HTTPException(404)
+    except service.FollowupError as e:
+        return redirect(f"/followups/{fid}", f"Not possible: {e}")
+    return redirect(f"/followups/{fid}", f"#{fid}: {action} done.")
+
+
+# ------------------------------------------------------------------ calendar proposals
+@app.get("/calendar", response_class=HTMLResponse)
+def calendar(request: Request, show: str = "open"):
+    from mailassistant.gcal.review import approval_pending
+
+    with db() as d:
+        q = select(EventProposal, Email).join(Email, Email.id == EventProposal.email_id)
+        if show == "open":
+            q = q.where(EventProposal.status.in_(("proposed", "approved", "failed")),
+                        EventProposal.end_at > utcnow()).order_by(EventProposal.start_at)
+        else:
+            q = q.where(EventProposal.status.in_(("created", "rejected", "superseded"))) \
+                .order_by(EventProposal.decided_at.desc().nulls_last()).limit(100)
+        rows = d.execute(q).all()
+        from mailassistant.gcal.review import calendars, private_calendar_usable, suggestion_for
+        st = settings()
+        suggest = {p.id: (p.target_calendar, None) if p.target_calendar else suggestion_for(d, e, st) for p, e in rows}
+        cals = calendars(d) or {}
+        private_ok = private_calendar_usable(d, st)
+    labels = {"work": ((cals.get("work") or {}).get("name") or "work"),
+              "private": ((cals.get("private") or {}).get("name") or "private")}
+    pending = any(approval_pending(p) for p, _ in rows)
+    return render(request, "calendar.html", rows=rows, show=show, pending=pending, approval_pending=approval_pending,
+                  suggest=suggest, private_enabled=private_ok, labels=labels,
+                  private_problem=bool(st.google_private_calendar) and not private_ok)
+
+
+@app.post("/calendar/bulk")
+def calendar_bulk(request: Request):
+    from mailassistant.gcal.review import ReviewError, reject_proposal
+
+    ids = form_ids(request)
+    if form_value(request, "action") != "reject" or not ids:
+        return redirect("/calendar", "Select one or more proposals first. (Approving is one at a time.)")
+    ok, errors = [], []
+    with db() as d:
+        for pid in ids:
+            try:
+                with d.begin_nested():
+                    reject_proposal(d, pid)
+                ok.append(f"#{pid}")
+            except ReviewError as e:
+                errors.append(f"#{pid}: {e}")
+    return redirect("/calendar", f"rejected: {', '.join(ok) or 'nothing'}" + (f". Not possible - {'; '.join(errors)}" if errors else ""))
+
+
+@app.post("/calendar/{pid}/approve")
+def calendar_approve(request: Request, pid: int):
+    from mailassistant.gcal.review import ReviewError, request_approval
+
+    try:
+        with db() as d:
+            request_approval(d, pid, accept_conflicts=form_value(request, "accept_conflicts") == "1",
+                             calendar=form_value(request, "calendar") or None, settings=settings())
+    except ReviewError as e:
+        return redirect("/calendar", f"#{pid}: {e}")
+    return redirect("/calendar", f"#{pid}: being created by the worker on the desktop…")
+
+
+# ------------------------------------------------------------------ mail / classification corrections
+@app.get("/mail", response_class=HTMLResponse)
+def mail(request: Request, category: str = "manual_review", days: int = 14):
+    days = max(1, min(days, 60))
+    with db() as d:
+        q = (select(Email, Classification).join(Classification, (Classification.email_id == Email.id)
+                                                & Classification.is_current.is_(True))
+             .where(Email.direction == "in", func.coalesce(Email.sent_at, Email.received_at) > utcnow() - timedelta(days=days)))
+        if category in CATEGORIES:
+            q = q.where(Classification.category == category)
+        rows = d.execute(q.order_by(func.coalesce(Email.sent_at, Email.received_at).desc()).limit(200)).all()
+        ids = [e.id for e, _ in rows]
+        actions: dict[int, list[str]] = {}
+        for a in d.scalars(select(ProposedAction).where(ProposedAction.email_id.in_(ids),
+                                                        ProposedAction.status == "proposed")):
+            actions.setdefault(a.email_id, []).append(a.action_type)
+        counts = dict(d.execute(select(Classification.category, func.count()).join(Email, Email.id == Classification.email_id)
+                                .where(Classification.is_current.is_(True),
+                                       func.coalesce(Email.sent_at, Email.received_at) > utcnow() - timedelta(days=days))
+                                .group_by(Classification.category)).all())
+    return render(request, "mail.html", rows=rows, category=category, days=days, categories=CATEGORIES,
+                  counts=counts, actions=actions)
+
+
+@app.post("/mail/{email_id}/category")
+def mail_correct(request: Request, email_id: int):
+    from mailassistant.classify.service import apply_user_correction
+
+    cat = form_value(request, "category")
+    back = form_value(request, "back", "/mail")
+    if cat not in CATEGORIES:
+        return redirect("/mail", "Unknown category.")
+    with db() as d:
+        if d.get(Email, email_id) is None:
+            raise HTTPException(404)
+        apply_user_correction(d, email_id, cat, note="corrected in dashboard")
+    return redirect(back if back.startswith("/mail") else "/mail", f"Mail {email_id} is now '{cat}'.")
+
+
+# ------------------------------------------------------------------ status (database only)
+@app.get("/status", response_class=HTMLResponse)
+def status(request: Request):
+    now = utcnow()
+    with db() as d:
+        comps = {c.component: c for c in d.scalars(select(ServiceStatus))}
+        jobs = d.execute(select(Job.type, Job.status, func.count()).where(
+            Job.status.in_(("queued", "running")) | (Job.finished_at > now - timedelta(days=1)))
+            .group_by(Job.type, Job.status).order_by(Job.type)).all()
+        dead = d.execute(select(Job.type, Job.last_error, Job.finished_at).where(
+            Job.status == "dead", Job.finished_at > now - timedelta(days=3)).order_by(Job.finished_at.desc()).limit(10)).all()
+        llm = d.execute(select(LlmCall.task, func.count(), func.count().filter(LlmCall.parsed_ok.is_(False)),
+                               func.avg(LlmCall.duration_ms)).where(LlmCall.created_at > now - timedelta(days=1))
+                        .group_by(LlmCall.task)).all()
+        from mailassistant.gcal.review import calendars as resolved_calendars
+        cals = resolved_calendars(d)
+        last_briefing = d.scalar(select(func.max(Briefing.briefing_date)))
+        last_push = d.scalar(select(func.max(AuditLog.at)).where(AuditLog.action == "ha_notified"))
+    worker = comps.get("worker")
+    worker_age = (now - worker.checked_at) if worker else None
+    return render(request, "status.html", comps=comps, jobs=jobs, dead=dead, llm=llm, worker_age=worker_age,
+                  stale=worker_age is None or worker_age > timedelta(minutes=5), last_briefing=last_briefing,
+                  last_push=last_push, now=now, error_class=lambda e: (e or "").split("(")[0][:80], cals=cals)
+
+
+@app.post("/status/test-notification")
+def status_test_notification(request: Request):
+    from mailassistant.db import queue
+
+    with db() as d:
+        queue.enqueue(d, "notify.test", {}, dedupe_key="notify.test", priority=10)
+    return redirect("/status", "Test notification queued for the worker.")
+
+
+def is_loopback(host: str) -> bool:
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return host in ("localhost",)
+
+
+__all__ = ["app", "is_loopback"]
