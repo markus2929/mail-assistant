@@ -75,6 +75,20 @@ def resolve_deadline(text: str, *, own: str, sent_at: datetime, tz: str) -> tupl
     return local.astimezone(UTC), notes
 
 
+_TRIGGER = re.compile(
+    r"^\s*(?:zet\s+)?(?:herinner\s+(?:me|mij)(?:\s+(?:er\s*)?aan|\s+om)?|ik\s+moet(?:\s+nog)?|niet\s+vergeten(?:\s+om)?|"
+    r"vergeet\s+niet(?:\s+om)?|remind\s+me(?:\s+to)?|i\s+(?:need|have)\s+to|don'?t\s+forget\s+to|todo:?)\s+", re.I)
+
+
+def own_words_action(quote: str, max_words: int = 15) -> str | None:
+    """For the user's own notes: the task in their own words (the verified quote minus "herinner me" etc.),
+    so a model can neither translate nor embellish it. None when the quote is too long to be a task title."""
+    text = _TRIGGER.sub("", " ".join((quote or "").split()), count=1).strip(" .,!;:")
+    if not text or len(text.split()) > max_words:
+        return None
+    return text[0].upper() + text[1:]
+
+
 def drafts_from_extraction(data: dict, *, mail_direction: str, own: str, subject: str | None, message_id: str,
                            sent_at: datetime, tz: str, min_confidence: float = 0.6
                            ) -> tuple[list[FollowupDraft], list[str]]:
@@ -96,6 +110,8 @@ def drafts_from_extraction(data: dict, *, mail_direction: str, own: str, subject
             rejected.append("low_confidence")
             continue
         direction = "I_OWE" if item.get("who_owes") == "user" else "THEY_OWE"
+        if mail_direction == "capture":
+            action = own_words_action(quote) or action
         deadline, notes = resolve_deadline(item.get("deadline_text") or "", own=text, sent_at=sent_at, tz=tz)
         if any(d.direction == direction and similar_actions(d.action_text, action) for d in drafts):
             rejected.append("duplicate_in_mail")

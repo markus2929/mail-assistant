@@ -179,7 +179,8 @@ def _followups(session: Session, email: Email, client, settings: Settings, text:
         result["reasons"]["followup"] = rejected[0] if rejected else "nothing_found"
 
 
-def process_capture(session: Session, capture_id: int, event_client, followup_client, settings: Settings) -> Capture | None:
+def process_capture(session: Session, capture_id: int, event_client, followup_client, settings: Settings,
+                    voice_followup_client=None) -> Capture | None:
     """Turn a capture into proposals. LLMUnavailable propagates (job deferred; dedupe keys make a retry safe)."""
     cap = session.get(Capture, capture_id, with_for_update=True)
     if cap is None or cap.status != "queued":
@@ -194,7 +195,8 @@ def process_capture(session: Session, capture_id: int, event_client, followup_cl
         if cap.kind in ("event", "auto"):
             _events(session, email, cap, event_client, settings, text, subject, result)
         if cap.kind in ("followup", "auto") and not (cap.kind == "auto" and result["events"]):
-            _followups(session, email, followup_client, settings, text, subject, result)
+            client = voice_followup_client if cap.source == "assist" and voice_followup_client else followup_client
+            _followups(session, email, client, settings, text, subject, result)
     cap.result, cap.processed_at = result, utcnow()
     cap.status = "done" if result["events"] or result["followups"] else "nothing"
     audit.record(session, actor="system", action="capture_processed", entity_type="capture", entity_id=cap.id,

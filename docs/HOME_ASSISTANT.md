@@ -31,6 +31,11 @@ engine your spoken text leaves your home before it reaches the assistant.
 
 There is no back-and-forth: if something is missing, say the whole sentence again.
 
+Speed: if your GPU cannot hold the classification model and the follow-up model at the same time, switching
+between them takes ~30 s - too long for Assist. `CAPTURE_VOICE_FOLLOWUP_MODEL` lets spoken follow-ups use the
+already loaded (faster) model; the task text is always taken from your own words, so a smaller model cannot
+translate or embellish it. Follow-ups from the dashboard and forwarded mail keep using `FOLLOWUP_OLLAMA_MODEL`.
+
 ### 1. Token on the assistant side
 ```sh
 openssl rand -hex 32 > secrets/capture_token && chmod 600 secrets/capture_token

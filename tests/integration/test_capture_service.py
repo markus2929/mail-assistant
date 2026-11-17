@@ -253,3 +253,13 @@ def test_assist_api_waits_for_the_worker_and_reads_the_result_back(client, s, se
     assert body["status"] == "done" and len(body["events"]) == 1
     assert body["speech"].startswith("Tandarts, ") and "om 15:00, staat klaar om te bevestigen." in body["speech"]
     assert "Ik heb middag aangenomen." in body["speech"]
+
+
+def test_spoken_followups_use_the_voice_model(s, settings):
+    spoken = create_capture(s, "herinner me Piet te bellen", "followup", "assist", settings)
+    typed = create_capture(s, "herinner me Jan te mailen", "followup", "dashboard", settings)
+    s.commit()
+    voice, careful = FakeModel(todo("Piet te bellen")), FakeModel(todo("Jan te mailen", action="Jan mailen"))
+    process_capture(s, spoken.id, FakeModel(), careful, settings, voice_followup_client=voice)
+    process_capture(s, typed.id, FakeModel(), careful, settings, voice_followup_client=voice)
+    assert (voice.calls, careful.calls) == (1, 1)

@@ -86,3 +86,21 @@ def test_null_strings_from_the_model_count_as_empty_and_mismatch_is_spoken():
     ev = {"title": "Tandarts", "start": "2026-11-25T14:00:00+00:00", "all_day": False, "status": "proposed",
           "kind": "invitation", "notes": ["weekday_mismatch"], "conflict": None}
     assert "kloppen niet" in speech("done", {"events": [ev]}, "Europe/Amsterdam")
+
+
+def test_own_notes_keep_the_users_words():
+    from mailassistant.followups.extract import drafts_from_extraction, own_words_action
+    assert own_words_action("herinner me vrijdag piet te bellen over de offerte") == "Vrijdag piet te bellen over de offerte"
+    assert own_words_action("ik moet nog boodschappen doen") == "Boodschappen doen"
+    assert own_words_action("remind me to email the accountant on monday") == "Email the accountant on monday"
+    assert own_words_action("woord " * 20) is None
+    item = dict(who_owes="user", action="Call Piet on Friday", deadline_text="vrijdag",
+                evidence_quote="herinner me vrijdag piet te bellen", confidence=0.9)
+    d = drafts_from_extraction({"reason": "r", "items": [item]}, mail_direction="capture",
+                               own="herinner me vrijdag piet te bellen", subject=None, message_id="m", sent_at=SENT,
+                               tz="Europe/Amsterdam")[0][0]
+    assert d.action_text == "Vrijdag piet te bellen"                 # not the model's English translation
+    m = drafts_from_extraction({"reason": "r", "items": [item]}, mail_direction="in",
+                               own="herinner me vrijdag piet te bellen", subject=None, message_id="m2", sent_at=SENT,
+                               tz="Europe/Amsterdam")[0][0]
+    assert m.action_text == "Call Piet on Friday"                    # mail behaviour unchanged

@@ -55,7 +55,7 @@ class Settings(BaseSettings):
     google_extra_calendars: Annotated[list[str], NoDecode] = []   # DEPRECATED: = google_conflict_calendars
     google_calendar_ids: Annotated[list[str], NoDecode] = []      # DEPRECATED: first = work, rest = extra
     google_shared_calendar_id: str = ""     # DEPRECATED: = google_private_calendar
-    calendar_work_addresses: Annotated[list[str], NoDecode] = ["info@example-business.com", "orders@example-business.com"]
+    calendar_work_addresses: Annotated[list[str], NoDecode] = ["info@example-business.com", "bestellingen@example-business.com"]
     calendar_travel_buffer_minutes: int = 30
     calendar_sync_past_days: int = 7
     calendar_sync_future_days: int = 180
@@ -73,7 +73,7 @@ class Settings(BaseSettings):
     web_trusted_proxies: str = "127.0.0.1"  # only with WEB_TLS=proxy
     web_session_idle_hours: int = 12
     web_session_max_days: int = 7
-    dashboard_url: str = ""                 # used in notifications, e.g. https://desktop.local:8443
+    dashboard_url: str = ""                 # used in notifications, e.g. https://archlinux.local:8443
 
     # --- Home Assistant notifications (Phase 6, optional) ---
     ha_url: str = ""                        # e.g. http://homeassistant.local:8123 ; empty = disabled
@@ -86,6 +86,8 @@ class Settings(BaseSettings):
     capture_addresses: Annotated[list[str], NoDecode] = []   # e.g. me+agenda@example.com,me+todo@example.com
     capture_token: SecretStr | None = None   # secret file; bearer token for POST /api/capture (empty = API off)
     capture_wait_seconds: float = 20.0       # how long /api/capture waits for the result to read back
+    capture_voice_followup_model: str | None = None  # model for SPOKEN follow-ups (Assist): fast beats careful
+                                                      # there (no model swap); None = FOLLOWUP_OLLAMA_MODEL
 
     # --- follow-ups and briefing (Phase 5) ---
     followup_window_days: int = 30          # only mail newer than this is scanned for commitments

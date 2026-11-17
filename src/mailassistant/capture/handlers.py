@@ -32,9 +32,14 @@ def capture_process(payload: dict) -> None:
     followup_client = copy.copy(event_client)
     if s.followup_ollama_model:
         followup_client.model = s.followup_ollama_model
+    voice_client = None
+    if s.capture_voice_followup_model:
+        voice_client = copy.copy(event_client)
+        voice_client.model = s.capture_voice_followup_model
     try:
         with session_scope() as session:
-            cap = process_capture(session, int(payload["capture_id"]), event_client, followup_client, s)
+            cap = process_capture(session, int(payload["capture_id"]), event_client, followup_client, s,
+                                  voice_followup_client=voice_client)
         if cap is not None:
             log.info("capture %s: %s", cap.id, cap.status)
     except LLMUnavailable as e:
