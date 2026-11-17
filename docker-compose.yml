@@ -1,55 +1,63 @@
 name: mailassistant
 
-# Everything runs on the desktop. Proton Bridge (IMAP 127.0.0.1:1143) and Ollama
-# (127.0.0.1:11434) listen on the desktop's loopback only, so the app containers use
-# host networking to reach them. Nothing here publishes a port to the network;
-# the dashboard binds to WEB_HOST (default 127.0.0.1).
+# HOME-SERVER layout: everything except Ollama runs on an always-on server.
+# - PostgreSQL and Proton Bridge are only reachable inside this compose network (nothing published).
+# - Only the dashboard is published (HTTPS on 8443).
+# - Ollama runs on another machine (e.g. the desktop with the GPU) behind the HTTPS token proxy from
+#   docker-compose.ollama-proxy.yml; set OLLAMA_BASE_URL, OLLAMA_CERT_SHA256 and secrets/ollama_token.
+# One computer for everything instead? Use docker-compose.single-host.yml. Setup: docs/SERVER_SETUP.md.
 
 x-app: &app
   build:
     context: .
     dockerfile: docker/app.Dockerfile
   image: mailassistant:dev
-  network_mode: host
   env_file: .env
-  secrets: [database_url, imap_password, fernet_key, google_client]
+  secrets: [database_url]
   restart: unless-stopped
   security_opt: ["no-new-privileges:true"]
   cap_drop: [ALL]
 
 services:
-  # Optional local PostgreSQL 17 (enable with: docker compose --profile local-db up -d).
-  # Skip this profile if you point secrets/database_url at an existing PostgreSQL instead.
   db:
     image: postgres:17
-    profiles: ["local-db"]
-    network_mode: host
-    command: ["postgres", "-c", "listen_addresses=127.0.0.1", "-c", "port=5433"]
     environment:
       POSTGRES_USER: mailassistant
       POSTGRES_DB: mailassistant
       POSTGRES_PASSWORD_FILE: /run/secrets/db_password
     secrets: [db_password]
-    volumes: ["mailassistant-pgdata:/var/lib/postgresql/data"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-p", "5433", "-U", "mailassistant"]
+      test: ["CMD", "pg_isready", "-U", "mailassistant"]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  bridge:
+    build:
+      context: .
+      dockerfile: docker/bridge.Dockerfile
+    image: mailassistant-bridge:dev
+    volumes: ["bridge:/home/bridge"]     # login, keychain and Bridge's mail cache
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    # IMAP on bridge:1144 inside this network only (STARTTLS, pinned); never published on the server
 
   migrate:
     <<: *app
     command: ["alembic", "upgrade", "head"]
     restart: "no"
     depends_on:
-      db: {condition: service_healthy, required: false}
+      db: {condition: service_healthy}
 
   web:
     <<: *app
     command: ["python", "-m", "mailassistant.web"]
-    # The dashboard needs the database only (no Google/IMAP/Fernet secrets): it may later run on a server,
-    # see docker-compose.web.yml.
+    environment:
+      WEB_HOST: 0.0.0.0                   # inside the container; reachable through the published port
+    ports: ["8443:8443"]
+    # Database only - no Google/IMAP/Ollama/Fernet secrets (the dashboard never talks to those)
     secrets: [database_url, web_password_hash, web_tls_cert, web_tls_key, capture_token]
     depends_on:
       migrate: {condition: service_completed_successfully}
@@ -57,9 +65,10 @@ services:
   worker:
     <<: *app
     command: ["python", "-m", "mailassistant.jobs.worker"]
-    secrets: [database_url, imap_password, fernet_key, google_client, ha_token]
+    secrets: [database_url, imap_password, fernet_key, google_client, ha_token, ollama_token]
     depends_on:
       migrate: {condition: service_completed_successfully}
+      bridge: {condition: service_started}
 
   scheduler:
     <<: *app
@@ -68,16 +77,18 @@ services:
       migrate: {condition: service_completed_successfully}
 
 volumes:
-  mailassistant-pgdata:
+  pgdata:
+  bridge:
 
 secrets:
-  database_url: {file: ./secrets/database_url}
-  imap_password: {file: ./secrets/imap_password}
+  database_url: {file: ./secrets/database_url}      # postgresql+psycopg://mailassistant:<db_password>@db:5432/mailassistant
+  db_password: {file: ./secrets/db_password}
+  imap_password: {file: ./secrets/imap_password}    # shown by Bridge after login (docs/SERVER_SETUP.md)
   fernet_key: {file: ./secrets/fernet_key}
   google_client: {file: ./secrets/google_client}
-  db_password: {file: ./secrets/db_password}   # only used by the optional local db
-  web_password_hash: {file: ./secrets/web_password_hash}  # python -m mailassistant.web.setpassword
-  web_tls_cert: {file: ./secrets/web_tls_cert}            # python -m mailassistant.web.makecert
+  web_password_hash: {file: ./secrets/web_password_hash}
+  web_tls_cert: {file: ./secrets/web_tls_cert}
   web_tls_key: {file: ./secrets/web_tls_key}
-  ha_token: {file: ./secrets/ha_token}                    # Home Assistant token; may be an empty file
-  capture_token: {file: ./secrets/capture_token}          # bearer token for Home Assistant Assist; empty = off
+  ha_token: {file: ./secrets/ha_token}              # empty file = Home Assistant notifications off
+  capture_token: {file: ./secrets/capture_token}    # empty file = voice capture API off
+  ollama_token: {file: ./secrets/ollama_token}      # token of the Ollama proxy on the desktop

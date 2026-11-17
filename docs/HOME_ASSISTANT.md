@@ -61,7 +61,7 @@ mail_assistant_auth: "Bearer PASTE-THE-TOKEN-HERE"
 ```yaml
 rest_command:
   mail_assistant_capture:
-    url: "https://192.168.1.20:8443/api/capture"     # your desktop's address (must be in WEB_ALLOWED_HOSTS)
+    url: "https://192.168.1.20:8443/api/capture"     # the machine running the dashboard (server or desktop; must be in WEB_ALLOWED_HOSTS)
     method: POST
     headers:
       Authorization: !secret mail_assistant_auth

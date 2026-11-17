@@ -1,4 +1,5 @@
 import logging
+from urllib.parse import urlparse
 from datetime import timedelta
 
 from sqlalchemy import delete, func, select
@@ -27,7 +28,14 @@ def ping(payload: dict) -> None:
         dead = session.scalar(select(func.count()).select_from(Job).where(
             Job.status == "dead", Job.finished_at > utcnow() - timedelta(days=1))) or 0
         set_status(session, "worker", True, f"queued={queued} dead_24h={dead}")
-        set_status(session, "ollama", ollama_ok, f"models: {models}" if ollama_ok else "not reachable")
+        if ollama_ok:
+            detail = f"models: {models}"
+        elif urlparse(s.ollama_base_url).hostname not in ("127.0.0.1", "localhost", "::1"):
+            detail = ("not reachable - the machine with Ollama (desktop) is probably off; AI work waits in the "
+                      "queue and continues when it is back")
+        else:
+            detail = "not reachable"
+        set_status(session, "ollama", ollama_ok, detail)
     log.info("ping ok")
 
 

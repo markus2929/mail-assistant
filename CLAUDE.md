@@ -18,10 +18,12 @@ desktop (Ryzen 5 7600, RX 7700 XT 12 GB). Read `docs/ARCHITECTURE.md` and `READM
 - Avoid false calendar events and false follow-up reminders above all; prefer "manual review" to guessing.
 
 ## Environment
-- Docker Compose project `mailassistant`; services `migrate`, `web`, `worker`, `scheduler`, optional `db`
-  (`--profile local-db`, postgres on 127.0.0.1:5433). App containers use `network_mode: host` because
-  Proton Bridge (IMAP 127.0.0.1:1143, STARTTLS, **certificate pinned** via `BRIDGE_CERT_SHA256`) and
-  Ollama (127.0.0.1:11434) listen on loopback only. Secrets are files in `./secrets/`.
+- Docker Compose project `mailassistant`. Two layouts: **home server** (`docker-compose.yml`: db, bridge, migrate,
+  web, worker, scheduler on a compose network; only the dashboard 8443 is published; Ollama on the desktop behind
+  `docker-compose.ollama-proxy.yml`) and **one machine** (`docker-compose.single-host.yml`: `network_mode: host`,
+  Proton Bridge app on 127.0.0.1:1143, Ollama on 127.0.0.1:11434, optional `db` profile on 127.0.0.1:5433).
+  Bridge's certificate is **pinned** via `BRIDGE_CERT_SHA256`, the Ollama proxy's via `OLLAMA_CERT_SHA256`.
+  Secrets are files in `./secrets/`.
 - Ollama models: classification `OLLAMA_MODEL=dolphin3:latest` (fast); follow-ups
   `FOLLOWUP_OLLAMA_MODEL=qwen3-14b-16k:latest` (dolphin3 produced mostly noise there). Context requested per call: `OLLAMA_NUM_CTX=8192`.
 - User: Dutch + English mail; own addresses me@example.com, info@example-business.com,
@@ -73,6 +75,11 @@ desktop (Ryzen 5 7600, RX 7700 XT 12 GB). Read `docs/ARCHITECTURE.md` and `READM
   work/personal re-queues the follow-up scan). Few-shot examples in the prompt only if rules are not enough. First
   check whether the week's corrections cluster by sender. Also check whether customer-service desk senders (seen in real mail)
   need a gate in `followups.service.extraction_gate`.
+- Home-server layout (2026-11-18): server runs everything except Ollama (`docker-compose.yml`: compose network,
+  Bridge in Docker from the official pinned .deb, only 8443 published); desktop runs Ollama behind
+  `docker-compose.ollama-proxy.yml` (Caddy, TLS + bearer token, only /api/chat + /api/tags); client pins the proxy
+  certificate (`OLLAMA_CERT_SHA256`, secret `ollama_token`). Runbook docs/SERVER_SETUP.md. One-machine layout:
+  `docker-compose.single-host.yml` (`COMPOSE_FILE` in .env). Server deploys from a git clone of this repository.
 - Also pending: applying the archive suggestions (`proposed_actions`) to the mailbox is NOT implemented
   and needs an explicit user opt-in design (Bridge: label via COPY to `Labels/Ads`, archive via MOVE).
 

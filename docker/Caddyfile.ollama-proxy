@@ -1,0 +1,38 @@
+# HTTPS + token proxy in front of Ollama, for the machine with the GPU (usually your desktop).
+# Ollama itself keeps listening on 127.0.0.1:11434 only; the server reaches it through this proxy.
+# Only the two endpoints the Mail Assistant uses are let through, and only with the right token.
+{
+	admin off
+	auto_https off
+}
+
+:{$OLLAMA_PROXY_PORT:11435} {
+	bind {$OLLAMA_PROXY_BIND:0.0.0.0}
+	tls /certs/cert.pem /certs/key.pem
+
+	request_body {
+		max_size 4MB
+	}
+
+	@allowed {
+		header Authorization "Bearer {$OLLAMA_PROXY_TOKEN}"
+		path /api/chat /api/tags
+		method GET POST
+	}
+	handle @allowed {
+		reverse_proxy 127.0.0.1:11434 {
+			header_up Host 127.0.0.1:11434   # Ollama on loopback only accepts local Host headers
+			header_up -Authorization         # the token stays here
+			transport http {
+				response_header_timeout 300s
+			}
+		}
+	}
+	handle {
+		respond "forbidden" 403
+	}
+	log {
+		output stderr
+		format console
+	}
+}

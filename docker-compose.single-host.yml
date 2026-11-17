@@ -1,0 +1,84 @@
+name: mailassistant
+
+# SINGLE-MACHINE layout: everything on one computer that also runs the Proton Bridge app and Ollama.
+# Bridge (IMAP 127.0.0.1:1143) and Ollama (127.0.0.1:11434) listen on loopback only, so the app containers use
+# host networking. Use it with:  docker compose -f docker-compose.single-host.yml --profile local-db up -d
+# (or COMPOSE_FILE=docker-compose.single-host.yml in .env). The default docker-compose.yml is the home-server
+# layout (Bridge in Docker, Ollama on another machine).
+
+x-app: &app
+  build:
+    context: .
+    dockerfile: docker/app.Dockerfile
+  image: mailassistant:dev
+  network_mode: host
+  env_file: .env
+  secrets: [database_url, imap_password, fernet_key, google_client]
+  restart: unless-stopped
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+
+services:
+  # Optional local PostgreSQL 17 (enable with: docker compose --profile local-db up -d).
+  # Skip this profile if you point secrets/database_url at an existing PostgreSQL instead.
+  db:
+    image: postgres:17
+    profiles: ["local-db"]
+    network_mode: host
+    command: ["postgres", "-c", "listen_addresses=127.0.0.1", "-c", "port=5433"]
+    environment:
+      POSTGRES_USER: mailassistant
+      POSTGRES_DB: mailassistant
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets: [db_password]
+    volumes: ["mailassistant-pgdata:/var/lib/postgresql/data"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-p", "5433", "-U", "mailassistant"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  migrate:
+    <<: *app
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    depends_on:
+      db: {condition: service_healthy, required: false}
+
+  web:
+    <<: *app
+    command: ["python", "-m", "mailassistant.web"]
+    # The dashboard needs the database only (no Google/IMAP/Fernet secrets): it may later run on a server,
+    # see docker-compose.web.yml.
+    secrets: [database_url, web_password_hash, web_tls_cert, web_tls_key, capture_token]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+
+  worker:
+    <<: *app
+    command: ["python", "-m", "mailassistant.jobs.worker"]
+    secrets: [database_url, imap_password, fernet_key, google_client, ha_token]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+
+  scheduler:
+    <<: *app
+    command: ["python", "-m", "mailassistant.jobs.scheduler"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+
+volumes:
+  mailassistant-pgdata:
+
+secrets:
+  database_url: {file: ./secrets/database_url}
+  imap_password: {file: ./secrets/imap_password}
+  fernet_key: {file: ./secrets/fernet_key}
+  google_client: {file: ./secrets/google_client}
+  db_password: {file: ./secrets/db_password}   # only used by the optional local db
+  web_password_hash: {file: ./secrets/web_password_hash}  # python -m mailassistant.web.setpassword
+  web_tls_cert: {file: ./secrets/web_tls_cert}            # python -m mailassistant.web.makecert
+  web_tls_key: {file: ./secrets/web_tls_key}
+  ha_token: {file: ./secrets/ha_token}                    # Home Assistant token; may be an empty file
+  capture_token: {file: ./secrets/capture_token}          # bearer token for Home Assistant Assist; empty = off

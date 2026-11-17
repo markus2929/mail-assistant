@@ -6,6 +6,7 @@ WORKDIR /app
 COPY pyproject.toml alembic.ini ./
 COPY src ./src
 COPY migrations ./migrations
+COPY scripts ./scripts
 RUN chmod -R a+rX /app
 RUN pip install .
 USER app

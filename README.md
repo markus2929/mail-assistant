@@ -56,11 +56,17 @@ flowchart LR
   Worker --> HA["Home Assistant<br/>(optional)"]
 ```
 
-Everything runs in Docker Compose on one Linux machine: `db` (PostgreSQL 17), `migrate` (applies database
-migrations at start-up), `worker` (sync, model calls, Google), `scheduler` (periodic jobs) and `web` (the
-dashboard). The dashboard only talks to the database, so it has no access to your mail password or Google
-credentials and could later run on another host (`docker-compose.web.yml`). Design details:
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Everything runs in Docker Compose: `db` (PostgreSQL 17), `migrate` (applies database migrations at start-up),
+`worker` (sync, model calls, Google), `scheduler` (periodic jobs) and `web` (the dashboard). Two layouts:
+
+| Layout | Where | Compose file |
+|---|---|---|
+| **One machine** | Bridge app, Ollama and the containers on one Linux computer | `docker-compose.single-host.yml` |
+| **Home server** | an always-on server runs everything incl. Bridge (in Docker); the desktop only runs Ollama behind an HTTPS proxy | `docker-compose.yml` + `docker-compose.ollama-proxy.yml` on the desktop - see [docs/SERVER_SETUP.md](docs/SERVER_SETUP.md) |
+
+With the home-server layout, mail sync, the dashboard, notifications and voice keep working while the desktop is off;
+AI work waits until it is back. The dashboard only talks to the database, so it never has your mail password or
+Google credentials. Design details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Requirements
 
@@ -74,6 +80,9 @@ credentials and could later run on another host (`docker-compose.web.yml`). Desi
 
 ## Installation
 
+These steps install everything on **one machine**. For a home server, follow [docs/SERVER_SETUP.md](docs/SERVER_SETUP.md)
+instead (it reuses the same settings and secrets).
+
 ### 1. Bridge, Ollama and Docker
 
 Follow [docs/DESKTOP_SETUP.md](docs/DESKTOP_SETUP.md): install and log in to Proton Mail Bridge (note the
@@ -86,6 +95,7 @@ git clone https://github.com/markus2929/mail-assistant.git
 cd mail-assistant
 python -m venv .venv && .venv/bin/pip install -e .     # only for the setup commands below
 cp .env.example .env
+echo "COMPOSE_FILE=docker-compose.single-host.yml" >> .env    # one-machine layout for all docker compose commands
 ```
 
 ### 3. Configure `.env`
@@ -226,6 +236,7 @@ Everything is set in `.env` (non-secret) and `secrets/` (secret). The most usefu
 | `OLLAMA_MODEL` | `qwen3:14b` | model for classification and calendar extraction |
 | `FOLLOWUP_OLLAMA_MODEL` | = `OLLAMA_MODEL` | model for follow-ups (should be careful) |
 | `OLLAMA_NUM_CTX` | `8192` | context window per call |
+| `OLLAMA_CERT_SHA256` + secret `ollama_token` | off | Ollama on another machine behind the HTTPS proxy (home-server layout) |
 | `CLASSIFY_WINDOW_DAYS` | `60` | how far back mail is classified (`0` pauses) |
 | `CLASSIFY_CONTEXT` | | free text about you and your addresses, added to the prompt |
 | `FOLLOWUP_WINDOW_DAYS` | `30` | how far back mail is scanned for commitments (`0` pauses) |
@@ -246,6 +257,7 @@ Everything is set in `.env` (non-secret) and `secrets/` (secret). The most usefu
 | `web_password_hash`, `web_tls_cert`, `web_tls_key` | the dashboard |
 | `google_client`, `fernet_key` | Google Calendar (empty file = off) |
 | `ha_token` | Home Assistant notifications (empty file = off) |
+| `ollama_token` | home-server layout: the token of the Ollama proxy on the desktop |
 | `capture_token` | voice via Home Assistant Assist (empty file = off) |
 
 ### Choosing models
@@ -284,11 +296,13 @@ Compare your `.env` with `.env.example` for new settings.
 | `setpassword` fails with "interactive terminal" | Run it in a normal terminal window, not through another program. |
 | `migrate` succeeds but no tables / `alembic history` empty | Files unreadable for the container user: `chmod -R go+rX migrations src`, then rebuild. |
 
-## Running the dashboard on another host
+## Running on a home server
 
-The dashboard needs only the database and its own secrets. `docker-compose.web.yml` shows how to run it on a
-home server (no host networking), for example behind a reverse proxy with `WEB_TLS=proxy`. The database then
-has to be reachable from both machines over TLS - see the comments in that file.
+Move everything except Ollama to an always-on server: Proton Bridge runs there in Docker (built from Proton's
+official, checksum-pinned package), the worker reaches Ollama on your desktop through an HTTPS proxy that checks a
+token and only allows the two endpoints the assistant uses, and its certificate is pinned. Step-by-step, including
+moving an existing database: [docs/SERVER_SETUP.md](docs/SERVER_SETUP.md). Behind your own reverse proxy, use
+`WEB_TLS=proxy` with `WEB_TRUSTED_PROXIES`.
 
 ## Development
 

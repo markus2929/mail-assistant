@@ -3,10 +3,14 @@
 
 Shows: STARTTLS certificate fingerprint (to pin in Phase 2), capabilities, folder names exactly
 as Bridge exposes them, and per-folder message count / UIDNEXT / UIDVALIDITY.
-Run on the desktop (Bridge must be running):  python3 scripts/imap_probe.py
-Uses only the standard library; reads .env and secrets/imap_password.
+Run where the app runs (Bridge must be running):
+  single machine:  python3 scripts/imap_probe.py
+  home server:     docker compose run --rm --no-deps worker python scripts/imap_probe.py
+Uses only the standard library; reads environment variables (as inside the containers), else ./.env, and the
+IMAP password from /run/secrets/imap_password, else ./secrets/imap_password.
 """
 import hashlib
+import os
 import imaplib
 import re
 import ssl
@@ -16,6 +20,8 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def env(key: str, default: str | None = None) -> str | None:
+    if os.environ.get(key):
+        return os.environ[key].strip()
     f = ROOT / ".env"
     if f.exists():
         for line in f.read_text().splitlines():
@@ -29,7 +35,8 @@ def env(key: str, default: str | None = None) -> str | None:
 host = env("IMAP_HOST", "127.0.0.1")
 port = int(env("IMAP_PORT", "1143"))
 user = env("IMAP_USERNAME")
-password = (ROOT / "secrets" / "imap_password").read_text().strip()
+secret = Path("/run/secrets/imap_password")
+password = (secret if secret.is_file() else ROOT / "secrets" / "imap_password").read_text().strip()
 if not user:
     raise SystemExit("IMAP_USERNAME missing in .env")
 

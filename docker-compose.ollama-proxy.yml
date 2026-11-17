@@ -1,0 +1,23 @@
+# Runs on the machine with Ollama (usually the desktop with the GPU), NOT on the server:
+#   docker compose -f docker-compose.ollama-proxy.yml up -d
+# Needs (see docs/SERVER_SETUP.md):
+#   secrets/ollama_proxy_cert, secrets/ollama_proxy_key  - python -m mailassistant.web.makecert --out <dir> ...
+#   secrets/ollama_proxy.env                             - OLLAMA_PROXY_TOKEN=<random>   (optional:
+#                                                          OLLAMA_PROXY_BIND=<this machine's LAN address>)
+name: mailassistant-ollama-proxy
+
+services:
+  ollama-proxy:
+    image: caddy:2.8.4
+    network_mode: host                  # Ollama listens on this machine's loopback
+    user: "1000:1000"                    # the owner of secrets/ (your user); change if your uid differs
+    tmpfs: ["/data:uid=1000,gid=1000", "/config:uid=1000,gid=1000"]   # Caddy working folders; nothing persists
+    env_file: ./secrets/ollama_proxy.env
+    volumes:
+      - ./docker/Caddyfile.ollama-proxy:/etc/caddy/Caddyfile:ro
+      - ./secrets/ollama_proxy_cert:/certs/cert.pem:ro
+      - ./secrets/ollama_proxy_key:/certs/key.pem:ro
+    restart: unless-stopped
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]         # the caddy binary carries this file capability; without it, it will not start
+    security_opt: ["no-new-privileges:true"]

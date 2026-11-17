@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     llm_log_prompts: bool = True  # store prompts/responses in llm_calls (purged after the retention)
     ollama_timeout_seconds: float = 180.0
     ollama_num_ctx: int | None = 8192  # context window sent with every request (None = model default)
+    # Ollama on another machine behind the HTTPS proxy (docker-compose.ollama-proxy.yml):
+    ollama_token: SecretStr | None = None   # secret file: bearer token the proxy expects
+    ollama_cert_sha256: str | None = None   # pin of the proxy's certificate (printed by web.makecert)
 
     # --- Google Calendar (Phase 4) ---
     google_client_file: str = "/run/secrets/google_client"   # OAuth "Desktop app" client JSON
@@ -73,7 +76,7 @@ class Settings(BaseSettings):
     web_trusted_proxies: str = "127.0.0.1"  # only with WEB_TLS=proxy
     web_session_idle_hours: int = 12
     web_session_max_days: int = 7
-    dashboard_url: str = ""                 # used in notifications, e.g. https://archlinux.local:8443
+    dashboard_url: str = ""                 # used in notifications, e.g. https://desktop.local:8443
 
     # --- Home Assistant notifications (Phase 6, optional) ---
     ha_url: str = ""                        # e.g. http://homeassistant.local:8123 ; empty = disabled
@@ -106,7 +109,7 @@ class Settings(BaseSettings):
     classify_body_chars: int = 6000
     classify_context: str = ""  # free text about you/your addresses, added to the prompt
 
-    @field_validator("bridge_cert_sha256", mode="before")
+    @field_validator("bridge_cert_sha256", "ollama_cert_sha256", mode="before")
     @classmethod
     def _clean_fingerprint(cls, v):
         return v.replace(":", "").strip().lower() if isinstance(v, str) and v.strip() else None

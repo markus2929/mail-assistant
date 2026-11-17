@@ -3,7 +3,7 @@
 ## Decisions
 | # | Decision | Notes |
 |---|---|---|
-| 1 | **All processes run on the desktop** (Arch): Bridge, Ollama, app services, PostgreSQL | *Changed 2026-11-10 from the server-orchestrated design.* The server is not used for now |
+| 1 | **Home server runs everything except Ollama** (PostgreSQL, Bridge in Docker, worker, scheduler, dashboard); the desktop runs Ollama behind an HTTPS + token proxy with a pinned certificate | *Changed 2026-11-18* (before: everything on the desktop, still possible with `docker-compose.single-host.yml`). AI work waits while the desktop is off |
 | 2 | App containers use host networking | Needed to reach Bridge/Ollama on loopback; nothing is published to the LAN |
 | 3 | Database: local `postgres:17` container (profile `local-db`, 127.0.0.1:5433) by default; any PostgreSQL via `secrets/database_url` also works | Mail content lives on the desktop disk: use disk encryption and back up the volume |
 | 4 | Desktop is on when mail is needed; no Wake-on-LAN | Sync pauses while off and catches up via UID tracking; LLM jobs defer and retry |
@@ -175,3 +175,16 @@ a tunnel; the code does not assume where Bridge or Ollama run.
   reply sentence comes from `capture/speech.py` (code, not model). The web app stays DB-only.
 - Edit before approving: `gcal.review.edit_proposal` (keeps the dedupe key, so the deterministic Google event id
   and duplicate protection stay; conflicts re-checked at approval) and `followups.service.edit_action`.
+
+## Home-server layout (2026-11-18)
+- `docker-compose.yml`: compose network, nothing published except the dashboard (8443); PostgreSQL and Bridge are only
+  reachable inside the network. Each service gets only its own secrets (web: DB + web secrets; worker: IMAP, Google,
+  HA, Ollama token).
+- Bridge: `docker/bridge.Dockerfile` installs Proton's official `.deb` (version + SHA-256 pinned; signature verified
+  against Proton's Bridge key when pinning), keychain `pass` + GPG in the `bridge` volume, Bridge runs headless
+  (`--noninteractive`); `socat` exposes its loopback IMAP on 1144 inside the network. Our STARTTLS pin still applies.
+- Ollama: `docker-compose.ollama-proxy.yml` (Caddy, pinned, host network, runs as uid 1000, no capabilities except the
+  one the binary carries) with a `makecert` certificate; allows only `/api/chat` and `/api/tags`, only with
+  `Authorization: Bearer <token>`, strips the token before forwarding and sets `Host: 127.0.0.1` (Ollama on loopback).
+  `llm/client.py` pins the proxy certificate (`OLLAMA_CERT_SHA256`) and sends the token only after the pin matched,
+  never over plain HTTP to another host. While the desktop is off, model jobs are deferred (nothing lost).
