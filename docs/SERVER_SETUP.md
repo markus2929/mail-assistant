@@ -33,7 +33,7 @@ New on the server:
 ```sh
 DBPW=$(openssl rand -hex 24)
 printf '%s' "$DBPW" > secrets/db_password
-printf '%s' "postgresql+psycopg://mailassistant:$DBPW@db:5432/mailassistant" > secrets/database_url
+printf '%s' "postgresql+psycopg://mailassistant:$DBPW@mailassistant-db:5432/mailassistant" > secrets/database_url
 touch secrets/imap_password secrets/ollama_token          # filled in steps 3 and 4
 docker run --rm --user "$(id -u)" -v "$PWD/secrets:/out" mailassistant:dev \
   python -m mailassistant.web.makecert --out /out --name "$(hostname)" --name "$(hostname).local" --ip SERVER
@@ -123,6 +123,24 @@ syncing; with the desktop off, Ollama shows "not reachable - … AI work waits i
   backup, then remove it (`docker volume rm mailassistant_mailassistant-pgdata`). The Proton Bridge app there may
   stay for a mail client.
 - From now on update with `git pull && docker compose build && docker compose up -d` on the server.
+
+## Reaching the dashboard by name from another container (e.g. Home Assistant)
+Put a `docker-compose.override.yml` next to `docker-compose.yml` (it is git-ignored) that adds the `web` service to
+that container's network with an alias, then use `https://mail-assistant:8443/...` (the internal port):
+```yaml
+services:
+  web:
+    networks:
+      default: {}
+      homeassistant:
+        aliases: [mail-assistant]
+networks:
+  homeassistant:
+    external: true
+    name: <the other container's network>   # docker inspect -f '{{json .NetworkSettings.Networks}}' homeassistant
+```
+Add `mail-assistant` to `WEB_ALLOWED_HOSTS`. Keep `database_url` on `mailassistant-db` (not `db`): the other network
+may have its own container called `db`.
 
 ## Backups
 Back up the server's `secrets/`, `.env` and the two volumes (`pgdata`, `bridge`), e.g. a nightly

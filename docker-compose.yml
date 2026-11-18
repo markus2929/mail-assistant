@@ -29,6 +29,10 @@ services:
       POSTGRES_PASSWORD_FILE: /run/secrets/db_password
     secrets: [db_password]
     volumes: ["pgdata:/var/lib/postgresql/data"]
+    networks:
+      default:
+        aliases: [mailassistant-db]   # use THIS name in database_url: plain "db" can clash when a service also
+                                      # joins another network (e.g. Home Assistant's) that has its own "db"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "mailassistant"]
@@ -84,7 +88,7 @@ volumes:
   bridge:
 
 secrets:
-  database_url: {file: ./secrets/database_url}      # postgresql+psycopg://mailassistant:<db_password>@db:5432/mailassistant
+  database_url: {file: ./secrets/database_url}      # postgresql+psycopg://mailassistant:<db_password>@mailassistant-db:5432/mailassistant
   db_password: {file: ./secrets/db_password}
   imap_password: {file: ./secrets/imap_password}    # shown by Bridge after login (docs/SERVER_SETUP.md)
   fernet_key: {file: ./secrets/fernet_key}
