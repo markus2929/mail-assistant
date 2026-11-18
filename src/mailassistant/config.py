@@ -73,7 +73,7 @@ class Settings(BaseSettings):
     web_tls_key_file: str = "/run/secrets/web_tls_key"
     web_password_hash: SecretStr | None = None  # secret file, made by `python -m mailassistant.web.setpassword`
     web_allowed_hosts: Annotated[list[str], NoDecode] = ["localhost", "127.0.0.1"]  # Host header check
-    web_trusted_proxies: str = "127.0.0.1"  # only with WEB_TLS=proxy
+    web_trusted_proxies: str = "127.0.0.1"  # X-Forwarded-For trusted only from these addresses/ranges (comma-separated)
     web_session_idle_hours: int = 12
     web_session_max_days: int = 7
     dashboard_url: str = ""                 # used in notifications, e.g. https://desktop.local:8443

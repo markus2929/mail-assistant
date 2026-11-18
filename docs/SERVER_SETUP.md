@@ -142,6 +142,16 @@ networks:
 Add `mail-assistant` to `WEB_ALLOWED_HOSTS`. Keep `database_url` on `mailassistant-db` (not `db`): the other network
 may have its own container called `db`.
 
+## Behind a reverse proxy (SWAG / nginx), home network + VPN only
+To get a proper certificate instead of the self-signed one, put the dashboard behind your reverse proxy. Keep the
+dashboard's own HTTPS (`WEB_TLS=self`) and let the proxy connect to `https://mail-assistant:8443` over the shared
+Docker network (see the previous section). Example for SWAG: [examples/swag-assistant.subdomain.conf](examples/swag-assistant.subdomain.conf)
+- it only allows your home network and VPN range; everything else gets 403. Then:
+- add the subdomain to SWAG's `SUBDOMAINS` (certificate) and recreate the SWAG container;
+- in `.env`: the full name in `WEB_ALLOWED_HOSTS`, `WEB_TRUSTED_PROXIES=<the proxy's Docker network range>` (so the
+  login throttle sees the real client address) and, if you like, `DASHBOARD_URL=https://<subdomain>`.
+Note: certificate names are public (certificate transparency logs) - the name is visible, the dashboard is not reachable.
+
 ## Backups
 Back up the server's `secrets/`, `.env` and the two volumes (`pgdata`, `bridge`), e.g. a nightly
 `docker compose exec -T db pg_dump -U mailassistant -Fc mailassistant > backup.dump` to an encrypted location.
