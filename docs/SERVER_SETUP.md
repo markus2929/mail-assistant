@@ -147,7 +147,9 @@ To get a proper certificate instead of the self-signed one, put the dashboard be
 dashboard's own HTTPS (`WEB_TLS=self`) and let the proxy connect to `https://mail-assistant:8443` over the shared
 Docker network (see the previous section). Example for SWAG: [examples/swag-assistant.subdomain.conf](examples/swag-assistant.subdomain.conf)
 - it only allows your home network and VPN range; everything else gets 403. Then:
-- add the subdomain to SWAG's `SUBDOMAINS` (certificate) and recreate the SWAG container;
+- add the subdomain to SWAG's `SUBDOMAINS` (certificate) and recreate the SWAG container. With DockSTARTer, do not
+  edit the generated `docker-compose.yml`: set it in `docker-compose.override.yml` (`swag: environment: SUBDOMAINS: ...`)
+  or in `.env.app.swag`;
 - in `.env`: the full name in `WEB_ALLOWED_HOSTS`, `WEB_TRUSTED_PROXIES=<the proxy's Docker network range>` (so the
   login throttle sees the real client address) and, if you like, `DASHBOARD_URL=https://<subdomain>`.
 Note: certificate names are public (certificate transparency logs) - the name is visible, the dashboard is not reachable.
