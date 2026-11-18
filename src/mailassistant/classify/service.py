@@ -60,7 +60,8 @@ def classify_email(session: Session, email_id: int, client, settings: Settings) 
     if email is None or email.direction != "in":
         return None
     cfg = ClassifyConfig.from_settings(settings)
-    view = build_view(session, email, settings.my_addresses)
+    from mailassistant.mail.accounts import own_addresses
+    view = build_view(session, email, own_addresses(session, settings))
     result = classify_view(client, view, cfg, _recorder(session, settings, PROMPT_VERSION),
                            known_correspondent=is_known_correspondent(session, email.account_id,
                                                                       email.from_addr))

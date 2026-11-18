@@ -29,11 +29,27 @@ CATEGORIES = ["personal", "work", "newsletter", "automated_notification", "marke
 
 
 class MailAccount(Base):
+    """One mailbox account. kind 'proton_bridge' = the account configured in .env (IMAP_*); kind 'imap' = an
+    extra account added with `python -m mailassistant.mail.accounts add` (settings live in these columns)."""
     __tablename__ = "mail_accounts"
+    __table_args__ = (
+        CheckConstraint(_in("kind", ["proton_bridge", "imap"]), name="ck_mail_accounts_kind"),
+        CheckConstraint(_in("auth", ["password", "microsoft_oauth"]), name="ck_mail_accounts_auth"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     address: Mapped[str] = mapped_column(String(320), unique=True)
     aliases: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=EMPTY_ARR)
     created_at: Mapped[datetime] = mapped_column(TZ, server_default=NOW)
+    kind: Mapped[str] = mapped_column(String(20), server_default="proton_bridge")
+    label: Mapped[str | None] = mapped_column(String(40), unique=True)   # short name, e.g. "work"
+    host: Mapped[str | None] = mapped_column(Text)
+    port: Mapped[int | None] = mapped_column(Integer)
+    username: Mapped[str | None] = mapped_column(Text)
+    auth: Mapped[str] = mapped_column(String(20), server_default="password")
+    encrypted_password: Mapped[bytes | None] = mapped_column(LargeBinary)   # Fernet; only for auth='password'
+    sync_include: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=EMPTY_ARR)  # empty = defaults
+    sync_exclude: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=EMPTY_ARR)
+    enabled: Mapped[bool] = mapped_column(Boolean, server_default="true")
 
 
 class Mailbox(Base):
@@ -94,6 +110,24 @@ class Email(Base):
     has_attachments: Mapped[bool] = mapped_column(Boolean, server_default="false")
     events_scanned_at: Mapped[datetime | None] = mapped_column(TZ)  # calendar extraction done (Phase 4)
     followups_scanned_at: Mapped[datetime | None] = mapped_column(TZ)  # follow-up extraction done (Phase 5)
+
+
+class MailAction(Base):
+    """A change to the MAILBOX that the user asked for by clicking in the dashboard. The only one is 'trash'
+    (IMAP MOVE to the account's Trash folder; never expunge). The email row itself is kept."""
+    __tablename__ = "mail_actions"
+    __table_args__ = (
+        CheckConstraint(_in("action", ["trash"]), name="ck_mail_actions_action"),
+        CheckConstraint(_in("status", ["requested", "done", "skipped", "failed"]), name="ck_mail_actions_status"),
+        Index("ix_mail_actions_status", "status"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email_id: Mapped[int] = mapped_column(ForeignKey("emails.id"), index=True)
+    action: Mapped[str] = mapped_column(String(10), server_default="trash")
+    status: Mapped[str] = mapped_column(String(10), server_default="requested")
+    requested_at: Mapped[datetime] = mapped_column(TZ, server_default=NOW)
+    done_at: Mapped[datetime | None] = mapped_column(TZ)
+    detail: Mapped[str | None] = mapped_column(Text)
 
 
 class EmailLocation(Base):

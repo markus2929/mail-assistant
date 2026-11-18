@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Move to Trash{% endblock %}
+{% block main %}
+<h1>Move {{ eligible|length }} mail(s) to Trash?</h1>
+<p>The worker moves them to the <b>Trash folder of your mailbox</b> (Proton: Trash, Outlook: Deleted Items). They stay
+recoverable there until your mail provider empties the Trash. Nothing is deleted permanently, and the assistant keeps
+its own record. A mail you restore from Trash shows up here again.</p>
+{% if eligible %}
+<form method="post" action="/mail/trash/confirm" class="bulk">
+  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="back" value="{{ back }}">
+  {% for id, _s, _f, _a in eligible %}<input type="hidden" name="ids" value="{{ id }}">{% endfor %}
+  <button class="danger">Yes, move {{ eligible|length }} to Trash</button>
+  <a href="{{ back }}">Cancel</a>
+</form>
+<table class="list">
+  <thead><tr><th>Mail</th><th>From</th></tr></thead>
+  <tbody>
+  {% for id, subject, sender, acct in eligible[:20] %}
+  <tr><td>{{ subject or '(no subject)' }}{% if accounts %} <span class="tag">{{ accounts.get(acct, '?') }}</span>{% endif %}</td><td class="muted small">{{ sender }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% if eligible|length > 20 %}<p class="muted small">… and {{ eligible|length - 20 }} more.</p>{% endif %}
+{% else %}
+<p class="muted">Nothing can be moved. <a href="{{ back }}">Back</a></p>
+{% endif %}
+{% if kept %}
+<h2>Kept ({{ kept|length }})</h2>
+<table class="list">
+  <tbody>
+  {% for id, subject, sender, why in kept %}
+  <tr><td>{{ subject or '(no subject)' }}</td><td class="muted small">{{ sender }}</td><td><span class="tag">{{ why }}</span></td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

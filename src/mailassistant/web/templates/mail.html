@@ -8,14 +8,27 @@
   <span class="sep"></span>
   {% for n in (7, 14, 30, 60) %}<a href="/mail?category={{ category }}&days={{ n }}" class="{{ 'on' if days == n }}">{{ n }}d</a>{% endfor %}
 </nav>
+{% if trash_queue %}<p class="muted small">{{ trash_queue }} mail(s) waiting to be moved to Trash by the worker.</p>{% endif %}
 {% if rows %}
+{# The row checkboxes belong to this form via form="trash"; the per-row correction forms stay separate. #}
+<form method="post" action="/mail/trash" id="trash">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="category" value="{{ category }}"><input type="hidden" name="days" value="{{ days }}">
+  <div class="bulk">
+    <label class="selall"><input type="checkbox" data-select-all> all</label>
+    <button name="scope" value="selected" class="danger">Move selected to Trash…</button>
+    <button name="scope" value="shown" class="danger">Move all {{ rows|length }} shown to Trash…</button>
+    <span class="muted small">You confirm on the next page. Mail goes to your mailbox's Trash (recoverable there).</span>
+  </div>
+</form>
 <table class="list">
-  <thead><tr><th>Date</th><th>Mail</th><th>Classification</th><th>Correct</th></tr></thead>
+  <thead><tr><th></th><th>Date</th><th>Mail</th><th>Classification</th><th>Correct</th></tr></thead>
   <tbody>
   {% for e, c in rows %}
   <tr>
+    <td><input type="checkbox" name="ids" value="{{ e.id }}" form="trash" aria-label="select mail {{ e.id }}"></td>
     <td class="nowrap">{{ (e.sent_at or e.received_at)|local('%d %b %H:%M') }}</td>
-    <td><b>{{ e.subject or '(no subject)' }}</b><div class="muted small">{{ e.from_name or '' }} &lt;{{ e.from_addr }}&gt;</div></td>
+    <td><b>{{ e.subject or '(no subject)' }}</b><div class="muted small">{{ e.from_name or '' }} &lt;{{ e.from_addr }}&gt;{% if accounts %} <span class="tag">{{ accounts.get(e.account_id, '?') }}</span>{% endif %}</div></td>
     <td><span class="tag">{{ c.category }}</span> {{ c.importance }} <span class="muted">{{ '%.2f'|format(c.confidence or 0) }} · {{ c.source }}</span>
       {% if c.injection_flag %}<span class="tag hot">injection?</span>{% endif %}
       {% for fl in c.safety_flags or [] %}<span class="tag">{{ fl }}</span>{% endfor %}

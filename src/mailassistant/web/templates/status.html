@@ -7,13 +7,15 @@
 <table class="list">
   <thead><tr><th>Component</th><th>State</th><th>Detail</th><th>Checked</th></tr></thead>
   <tbody>
-  {% for name in ['worker', 'ollama', 'bridge', 'google', 'homeassistant'] %}{% set c = comps.get(name) %}
+  {% for name in ['worker', 'ollama', 'bridge'] + mail_components + ['google', 'homeassistant'] %}{% set c = comps.get(name) %}
   <tr><td>{{ name }}</td>
       <td>{% if c %}<span class="tag {{ 'ok' if c.ok else 'hot' }}">{{ 'ok' if c.ok else 'problem' }}</span>{% else %}<span class="muted">no report</span>{% endif %}</td>
       <td class="small">{{ c.detail if c else '' }}</td><td class="small nowrap">{{ c.checked_at|local if c else '' }}</td></tr>
   {% endfor %}
   </tbody>
 </table>
+{% if trash_failed %}<p class="warn small">Move to Trash: {{ trash_failed }} mail(s) could not be moved in the last 7 days
+  (see the audit log entry <code>mail_moved_to_trash</code> / the detail on the request).</p>{% endif %}
 <p class="muted small">Last briefing: {{ last_briefing or '-' }} · last Home Assistant push: {{ last_push|local if last_push else '-' }}</p>
 <form method="post" action="/status/test-notification"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="secondary">Send test notification</button></form>
 

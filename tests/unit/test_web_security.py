@@ -69,7 +69,7 @@ def test_notification_texts_counts_by_default_and_short_full_texts_on_request():
 
 def test_web_package_never_imports_secret_bound_clients():
     code = ("import sys, mailassistant.web.app as a; "
-            "bad=[m for m in ('mailassistant.gcal.tokens','mailassistant.mail.imap_bridge','mailassistant.gcal.authorize') if m in sys.modules]; "
+            "bad=[m for m in ('mailassistant.gcal.tokens','mailassistant.mail.imap_bridge','mailassistant.gcal.authorize','mailassistant.mail.accounts','mailassistant.mail.msauth') if m in sys.modules]; "
             "print(bad)")
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout.strip()
     assert out == "[]"

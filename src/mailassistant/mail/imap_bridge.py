@@ -1,8 +1,12 @@
-"""Read-only IMAP access to Proton Bridge.
+"""IMAP access: Proton Bridge and other IMAP servers (e.g. Microsoft 365).
 
-- STARTTLS with the Bridge certificate PINNED by SHA-256 fingerprint; the password is only sent
-  after the pin matched (so a wrong/hostile listener never sees it).
-- Only EXAMINE (read-only) and BODY.PEEK are used: nothing can change flags or mark mail as read.
+- Bridge (tls="starttls_pin"): STARTTLS with the Bridge certificate PINNED by SHA-256 fingerprint; the
+  password is only sent after the pin matched (so a wrong/hostile listener never sees it).
+- Other servers (tls="imaps"): implicit TLS with normal certificate + host name verification (system CAs);
+  login with a password or OAuth2 (XOAUTH2, access token from a callable).
+- ImapBridgeSource (sync) only uses EXAMINE (read-only) and BODY.PEEK: nothing can change flags or mark
+  mail as read. MailWriter adds exactly one write operation: UID MOVE to the Trash folder (never EXPUNGE,
+  never \\Deleted), used only for the user's own "Move to Trash" clicks (mail/trash.py).
 """
 from __future__ import annotations
 
@@ -11,7 +15,8 @@ import hmac
 import imaplib
 import re
 import ssl
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from datetime import date
 
 from mailassistant.mail.source import (BridgeCertMismatch, MailboxInfo, MailboxStatus,
                                        MailSourceAuthError, MailSourceError,
@@ -61,18 +66,45 @@ def parse_fetch_items(data) -> list[tuple[int, bytes]]:
     return out
 
 
+def imap_date(d: date) -> str:
+    """IMAP date (RFC 3501): 03-Nov-2026 - month names are always English, independent of the locale."""
+    months = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+    return f"{d.day:02d}-{months[d.month - 1]}-{d.year}"
+
+
+def xoauth2_string(user: str, access_token: str) -> bytes:
+    """SASL XOAUTH2 initial response (imaplib base64-encodes it)."""
+    return f"user={user}\x01auth=Bearer {access_token}\x01\x01".encode()
+
+
+def find_trash(infos: list[MailboxInfo]) -> str | None:
+    for i in infos:
+        if "\\trash" in i.flags:
+            return i.name
+    names = {i.name.lower(): i.name for i in infos}
+    for cand in ("trash", "deleted items", "deleted messages", "prullenbak", "verwijderde items"):
+        if cand in names:
+            return names[cand]
+    return None
+
+
 def extract_message_id(header_bytes: bytes) -> str | None:
     m = _MSGID_RE.search(header_bytes)
     return re.sub(rb"\s+", b"", m.group(1)).decode("ascii", "replace").lower() if m else None
 
 
 class ImapBridgeSource:
-    def __init__(self, host: str, port: int, username: str, password: str,
-                 cert_sha256: str | None, *, timeout: float = 120.0):
+    def __init__(self, host: str, port: int, username: str, password: str | None,
+                 cert_sha256: str | None, *, timeout: float = 120.0, tls: str = "starttls_pin",
+                 token_provider: Callable[[], str] | None = None):
+        if tls not in ("starttls_pin", "imaps"):
+            raise ValueError(f"unknown tls mode {tls!r}")
         self.host, self.port, self.username = host, port, username
         self._password = password
         self._pin = (cert_sha256 or "").replace(":", "").lower()
         self.timeout = timeout
+        self.tls = tls
+        self._token_provider = token_provider   # OAuth2: returns a fresh access token
         self._m: imaplib.IMAP4 | None = None
         self._selected: str | None = None
 
@@ -100,6 +132,13 @@ class ImapBridgeSource:
             self._m = None
 
     def _connect(self) -> None:
+        if self.tls == "starttls_pin":
+            self._m = self._connect_bridge()
+        else:
+            self._m = self._connect_imaps()
+        self._selected = None
+
+    def _connect_bridge(self) -> imaplib.IMAP4:
         if not self._pin:
             raise MailSourceError(
                 "BRIDGE_CERT_SHA256 is not set. Run scripts/imap_probe.py and put the printed "
@@ -118,12 +157,41 @@ class ImapBridgeSource:
                 m.shutdown()  # close without sending anything (no credentials leave this process)
                 raise BridgeCertMismatch(
                     f"Bridge certificate fingerprint {fp} does not match the pinned value")
-            m.login(self.username, self._password)
+            self._login(m)
         except (OSError, imaplib.IMAP4.abort) as e:
             raise MailSourceUnavailable(str(e)) from e
         except imaplib.IMAP4.error as e:
             raise MailSourceAuthError(f"IMAP login failed: {e}") from e
-        self._m, self._selected = m, None
+        return m
+
+    def _connect_imaps(self) -> imaplib.IMAP4:
+        ctx = ssl.create_default_context()   # certificate chain + host name are verified
+        try:
+            m = imaplib.IMAP4_SSL(self.host, self.port, ssl_context=ctx, timeout=self.timeout)
+        except ssl.SSLCertVerificationError as e:
+            raise BridgeCertMismatch(f"certificate of {self.host} not trusted: {e}") from e
+        except (OSError, imaplib.IMAP4.error) as e:
+            raise MailSourceUnavailable(f"cannot connect to {self.host}:{self.port}: {e}") from e
+        try:
+            if self._pin:   # optional extra pin on top of normal verification
+                fp = hashlib.sha256(m.sock.getpeercert(binary_form=True)).hexdigest()
+                if not hmac.compare_digest(fp, self._pin):
+                    m.shutdown()
+                    raise BridgeCertMismatch(f"certificate fingerprint {fp} does not match the pinned value")
+            self._login(m)
+        except (OSError, imaplib.IMAP4.abort) as e:
+            raise MailSourceUnavailable(str(e)) from e
+        except imaplib.IMAP4.error as e:
+            raise MailSourceAuthError(f"IMAP login failed: {e}") from e
+        return m
+
+    def _login(self, m: imaplib.IMAP4) -> None:
+        if self._token_provider is not None:
+            token = self._token_provider()
+            raw = xoauth2_string(self.username, token)
+            m.authenticate("XOAUTH2", lambda _challenge: raw)
+        else:
+            m.login(self.username, self._password or "")
 
     def _run(self, fn, *args, empty_ok: bool = False):
         try:
@@ -157,9 +225,12 @@ class ImapBridgeSource:
         except KeyError as e:
             raise MailSourceError(f"unexpected STATUS response for {name!r}: {data!r}") from e
 
-    def search_uids(self, name: str, from_uid: int = 1) -> list[int]:
+    def search_uids(self, name: str, from_uid: int = 1, *, since: date | None = None) -> list[int]:
         self._examine(name)
-        data = self._run(self._m.uid, "SEARCH", "UID", f"{from_uid}:*", empty_ok=True)
+        crit = ["UID", f"{from_uid}:*"]
+        if since is not None:
+            crit += ["SINCE", imap_date(since)]
+        data = self._run(self._m.uid, "SEARCH", *crit, empty_ok=True)
         raw = (data[0] if data else None) or b""
         uids = [int(x) for x in raw.split()]
         return sorted(u for u in uids if u >= from_uid)  # "n:*" always returns the last message
@@ -178,3 +249,40 @@ class ImapBridgeSource:
         self._examine(name)
         data = self._run(self._m.uid, "FETCH", ",".join(map(str, uids)), "(UID BODY.PEEK[])", empty_ok=True)
         return iter(parse_fetch_items(data))
+
+
+class MailWriter(ImapBridgeSource):
+    """The ONE write path: move messages to the account's Trash with UID MOVE (RFC 6851).
+
+    No EXPUNGE, no \\Deleted flag, no fallback: a server without MOVE gets an error instead. Only UIDs whose
+    Message-ID on the server equals the one in our database are moved (see mail/trash.matching_uids).
+    """
+
+    def capabilities(self) -> set[str]:
+        data = self._run(self._m.capability)
+        return {c.upper() for c in b" ".join(x for x in data if isinstance(x, bytes)).decode().split()}
+
+    def move_to_trash(self, name: str, uidvalidity: int | None, expected: dict[int, str]) -> list[int]:
+        from mailassistant.mail.trash import matching_uids
+
+        if not expected:
+            return []
+        if "MOVE" not in self.capabilities():
+            raise MailSourceError("this mail server does not support IMAP MOVE; nothing was changed")
+        trash = find_trash(self.list_mailboxes())
+        if trash is None:
+            raise MailSourceError("no Trash folder found on the server; nothing was changed")
+        if trash == name:
+            return []
+        st = self.status(name)
+        if uidvalidity is not None and st.uidvalidity != uidvalidity:
+            raise MailSourceError(f"{name!r} was renumbered (UIDVALIDITY changed); run a sync first")
+        self._run(self._m.select, quote_mailbox(name), False)   # read-write: needed for MOVE
+        self._selected = None   # force EXAMINE again for any later read
+        data = self._run(self._m.uid, "FETCH", ",".join(map(str, sorted(expected))),
+                         "(UID BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])", empty_ok=True)
+        on_server = {uid: extract_message_id(body) for uid, body in parse_fetch_items(data)}
+        uids = matching_uids(expected, on_server)
+        if uids:
+            self._run(self._m.uid, "MOVE", ",".join(map(str, uids)), quote_mailbox(trash))
+        return uids

@@ -1,8 +1,12 @@
 """Strict allowlist of everything the system may do. Anything not listed here cannot happen.
 
-Sending mail, deleting mail, accepting invitations and changing settings are deliberately
+Sending mail, permanently deleting mail, accepting invitations and changing settings are deliberately
 ABSENT: they do not exist as actions in this version. Model output can only ever be turned
 into one of these proposal types by deterministic code.
+
+The only action that changes the mailbox is MOVE_TO_TRASH: it exists solely as a user click in the
+dashboard (confirm page), is carried out with IMAP MOVE to the account's Trash folder (recoverable there)
+and never by the model or automatically.
 """
 from enum import StrEnum
 
@@ -15,6 +19,7 @@ class ActionType(StrEnum):
     PROPOSE_FOLLOWUP = "propose_followup"
     PROPOSE_CLOSE_FOLLOWUP = "propose_close_followup"
     NOTIFY_USER = "notify_user"  # push to the user's OWN Home Assistant (Phase 6); never to anyone else
+    MOVE_TO_TRASH = "move_to_trash"  # only from an explicit dashboard click; IMAP MOVE to Trash, never expunge
 
 
 class AutomationLevel(StrEnum):
@@ -36,6 +41,7 @@ MAX_LEVEL: dict[ActionType, AutomationLevel] = {
     ActionType.PROPOSE_FOLLOWUP: AutomationLevel.AUTO,
     ActionType.PROPOSE_CLOSE_FOLLOWUP: AutomationLevel.APPLY_AFTER_APPROVAL,
     ActionType.NOTIFY_USER: AutomationLevel.AUTO,
+    ActionType.MOVE_TO_TRASH: AutomationLevel.APPLY_AFTER_APPROVAL,
 }
 
 

@@ -339,3 +339,114 @@ def test_calendar_choice_buttons_and_stored_choice(client, s, settings):
     assert "calendar=work" in s.scalar(select(AuditLog.detail).where(AuditLog.action == "event_approval_requested"))
     st = client.get("/status")
     assert "Familie" in st.text and "Checked for conflicts: Agenda, Familie" in st.text
+
+
+# ------------------------------------------------------------------ Move to Trash
+def _locate(s, eid, uid, name="INBOX"):
+    from mailassistant.db.models import EmailLocation, Mailbox
+    mb = s.scalar(select(Mailbox).where(Mailbox.name == name))
+    if mb is None:
+        mb = Mailbox(account_id=s.acct.id, name=name, role="inbox", uidvalidity=7)
+        s.add(mb)
+        s.flush()
+    s.add(EmailLocation(email_id=eid, mailbox_id=mb.id, uid=uid))
+    s.commit()
+    return mb.id
+
+
+def test_move_to_trash_confirm_then_queue_and_hide(client, s):
+    from mailassistant.db.models import MailAction
+    token = login(client)
+    a, b, c = mail(s, "Sale 1", "marketing"), mail(s, "Sale 2", "marketing"), mail(s, "Sale 3", "marketing")
+    followup(s, c, status="open")              # has an open follow-up -> kept
+    page = client.get("/mail?category=marketing&days=14")
+    assert "Move all 3 shown to Trash" in page.text and 'form="trash"' in page.text
+    # step 1: "all shown" -> confirm page, nothing recorded yet
+    r = client.post("/mail/trash", data={"csrf": token, "scope": "shown", "category": "marketing", "days": "14"})
+    assert r.status_code == 200 and "Move 2 mail(s) to Trash?" in r.text and "has an open follow-up" in r.text
+    assert s.scalar(select(MailAction.id)) is None
+    # step 2: confirm
+    r = client.post("/mail/trash/confirm", data={"csrf": token, "ids": [str(a), str(b)],
+                                                  "back": "/mail?category=marketing&days=14"}, follow_redirects=False)
+    assert r.status_code == 303
+    s.expire_all()
+    assert sorted(m.email_id for m in s.scalars(select(MailAction))) == [a, b]
+    assert s.scalar(select(Job).where(Job.type == "mail.trash")) is not None
+    assert s.scalar(select(AuditLog).where(AuditLog.action == "move_to_trash")) is not None
+    page = client.get("/mail?category=marketing&days=14").text
+    assert "Sale 1" not in page and "Sale 2" not in page and "Sale 3" in page and "marketing (1)" in page
+    # asking again: already requested -> kept, nothing new
+    r = client.post("/mail/trash", data={"csrf": token, "scope": "selected", "ids": [str(a)],
+                                         "category": "marketing", "days": "14"})
+    assert "already moved to Trash" in r.text and "Move 0 mail(s)" in r.text
+
+
+def test_trash_requires_csrf_and_selection(client, s):
+    token = login(client)
+    eid = mail(s, "X", "marketing")
+    assert client.post("/mail/trash", data={"scope": "selected", "ids": [str(eid)]}).status_code == 403
+    assert client.post("/mail/trash/confirm", data={"ids": [str(eid)]}).status_code == 403
+    r = client.post("/mail/trash", data={"csrf": token, "scope": "selected", "category": "marketing", "days": "14"},
+                    follow_redirects=False)
+    assert r.status_code == 303 and "Select" in r.headers.get("set-cookie", "")
+
+
+def test_restored_mail_shows_again(client, s):
+    from mailassistant.db.models import EmailLocation, MailAction
+    login(client)
+    eid = mail(s, "Restored", "marketing")
+    mb = _locate(s, eid, 5)
+    s.add(MailAction(email_id=eid, status="done", requested_at=utcnow() - timedelta(hours=2), done_at=utcnow()))
+    loc = s.scalar(select(EmailLocation).where(EmailLocation.uid == 5))
+    loc.removed_at = utcnow() - timedelta(hours=1)
+    s.commit()
+    assert "Restored" not in client.get("/mail?category=marketing").text
+    s.add(EmailLocation(email_id=eid, mailbox_id=mb, uid=9))   # user moved it back from Trash -> new UID
+    s.commit()
+    assert "Restored" in client.get("/mail?category=marketing").text
+
+
+def test_trash_handler_moves_only_verified_uids(s, engine, monkeypatch):
+    from mailassistant.db.models import EmailLocation, MailAction
+    from mailassistant.mail import handlers as mh
+    from mailassistant.mail.trash import request_trash
+
+    factory = sessionmaker(engine, expire_on_commit=False)
+
+    class Scope:
+        def __enter__(self):
+            self.s = factory()
+            return self.s
+
+        def __exit__(self, exc, *a):
+            (self.s.rollback if exc else self.s.commit)()
+            self.s.close()
+
+    a, b, gone = mail(s, "A", "marketing"), mail(s, "B", "marketing"), mail(s, "Gone", "marketing")
+    _locate(s, a, 11)
+    _locate(s, b, 12)
+    request_trash(s, [a, b, gone])
+    s.commit()
+    calls = []
+
+    class FakeWriter:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *e):
+            pass
+
+        def move_to_trash(self, name, validity, expected):
+            calls.append((name, validity, dict(expected)))
+            return [11]                       # uid 12 had another Message-ID on the server -> not moved
+
+    monkeypatch.setattr(mh, "session_scope", Scope)
+    monkeypatch.setattr(mh, "get_settings", lambda: Settings(_env_file=None, database_url="postgresql+psycopg://x:y@h/d"))
+    monkeypatch.setattr(mh, "source_for", lambda session, st, acct, cls=None: FakeWriter())
+    mh.mail_trash({})
+    s.expire_all()
+    st = {m.email_id: m.status for m in s.scalars(select(MailAction))}
+    assert st == {a: "done", b: "skipped", gone: "skipped"}
+    assert calls[0][0] == "INBOX" and calls[0][1] == 7 and set(calls[0][2]) == {11, 12}
+    assert s.scalar(select(EmailLocation.removed_at).where(EmailLocation.uid == 11)) is not None
+    assert s.scalar(select(EmailLocation.removed_at).where(EmailLocation.uid == 12)) is None

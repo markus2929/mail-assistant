@@ -16,6 +16,7 @@ import logging
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
+from datetime import date
 
 from sqlalchemy import delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
@@ -62,14 +63,9 @@ def _chunks(items: list, n: int) -> Iterator[list]:
 
 
 def ensure_account(session: Session, settings: Settings) -> MailAccount:
-    address = (settings.imap_username or (settings.my_addresses or [""])[0]).lower()
-    acct = session.scalar(select(MailAccount).where(MailAccount.address == address))
-    if acct is None:
-        acct = MailAccount(address=address)
-        session.add(acct)
-    acct.aliases = [a for a in settings.my_addresses if a != address]
-    session.flush()
-    return acct
+    """The Proton account from .env (kept for callers/tests; see mail/accounts.py)."""
+    from mailassistant.mail.accounts import proton_account
+    return proton_account(session, settings)
 
 
 def _get_mailbox(session: Session, account: MailAccount, info: MailboxInfo) -> Mailbox:
@@ -197,7 +193,8 @@ def _store_message(session: Session, account: MailAccount, mb: Mailbox, mine: se
 # ------------------------------------------------------------------------------ mailbox
 def sync_mailbox(session: Session, source: MailSource, account: MailAccount, info: MailboxInfo,
                  mine: set[str], *, full: bool, deadline: float,
-                 clock: Callable[[], float] = time.monotonic, batch_size: int = BATCH) -> SyncStats:
+                 clock: Callable[[], float] = time.monotonic, batch_size: int = BATCH,
+                 since: date | None = None) -> SyncStats:
     stats = SyncStats()
     mb = _get_mailbox(session, account, info)
     st = source.status(info.name)
@@ -218,7 +215,9 @@ def sync_mailbox(session: Session, source: MailSource, account: MailAccount, inf
     known = set(session.scalars(select(EmailLocation.uid).where(
         EmailLocation.mailbox_id == mb.id, EmailLocation.removed_at.is_(None))))
     scan_all = full or mb.last_uid == 0
-    server = set(source.search_uids(info.name, 1 if scan_all else mb.last_uid + 1))
+    from_uid = 1 if scan_all else mb.last_uid + 1
+    server = set(source.search_uids(info.name, from_uid, since=since) if since
+                 else source.search_uids(info.name, from_uid))
 
     if scan_all:
         gone = sorted(known - server)
@@ -270,11 +269,18 @@ def sync_mailbox(session: Session, source: MailSource, account: MailAccount, inf
 # ------------------------------------------------------------------------------- account
 def sync_account(session: Session, source: MailSource, settings: Settings, *, full: bool = False,
                  budget_seconds: float = 120.0, batch_size: int = BATCH,
-                 clock: Callable[[], float] = time.monotonic) -> SyncStats:
-    account = ensure_account(session, settings)
-    mine = {a.lower() for a in settings.my_addresses} | {account.address}
-    infos = sorted(select_mailboxes(source.list_mailboxes(), settings.sync_include,
-                                    settings.sync_exclude), key=lambda i: (sync_priority(i), i.name))
+                 clock: Callable[[], float] = time.monotonic, account: MailAccount | None = None) -> SyncStats:
+    """Synchronise one account (default: the Proton account from .env)."""
+    from mailassistant.mail.accounts import SKIP_ROLES, backfill_since, own_addresses, sync_patterns
+
+    account = account or ensure_account(session, settings)
+    mine = set(own_addresses(session, settings)) | {account.address}
+    include, exclude = sync_patterns(account, settings)
+    infos = select_mailboxes(source.list_mailboxes(), include, exclude)
+    if account.kind != "proton_bridge":   # other servers: also skip Trash/Spam/Drafts/... by their flags
+        infos = [i for i in infos if mailbox_role(i.name, i.flags) not in SKIP_ROLES]
+    infos = sorted(infos, key=lambda i: (sync_priority(i), i.name))
+    since = backfill_since(account, settings)
     total = SyncStats(mailboxes=len(infos))
     overall = clock() + budget_seconds
     share = max(5.0, min(15.0, budget_seconds / max(len(infos), 1)))
@@ -282,7 +288,7 @@ def sync_account(session: Session, source: MailSource, settings: Settings, *, fu
     # Pass 1: every mailbox gets a short turn (so Sent etc. are not starved by a big INBOX backfill)
     for info in infos:
         st = sync_mailbox(session, source, account, info, mine, full=full,
-                          deadline=min(overall, clock() + share), clock=clock, batch_size=batch_size)
+                          deadline=min(overall, clock() + share), clock=clock, batch_size=batch_size, since=since)
         total.merge(st)
         if st.remaining:
             pending.append(info)
@@ -291,6 +297,6 @@ def sync_account(session: Session, source: MailSource, settings: Settings, *, fu
         if clock() >= overall:
             break
         total.merge(sync_mailbox(session, source, account, info, mine, full=False,
-                                 deadline=overall, clock=clock, batch_size=batch_size))
+                                 deadline=overall, clock=clock, batch_size=batch_size, since=since))
     session.commit()
     return total

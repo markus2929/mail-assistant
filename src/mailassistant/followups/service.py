@@ -48,9 +48,10 @@ class FollowupError(Exception):
 
 
 # ------------------------------------------------------------------ helpers
-def _mine(settings: Settings, email: Email | None = None) -> set[str]:
+def _mine(session: Session, settings: Settings, email: Email | None = None) -> set[str]:
     # capture addresses (me+agenda@...) are the user's own: such mail is handled by the capture job, not here
-    own = {a.lower() for a in [*settings.my_addresses, *settings.capture_addresses]}
+    from mailassistant.mail.accounts import own_addresses
+    own = {a.lower() for a in [*own_addresses(session, settings), *settings.capture_addresses]}
     if email is not None and email.direction == "out" and email.from_addr:
         own.add(email.from_addr.lower())  # e.g. facturen@ or an old address the user sent from
     return own
@@ -91,7 +92,7 @@ def _current_class(session: Session, email_id: int) -> Classification | None:
 
 def extraction_gate(session: Session, email: Email, settings: Settings) -> str | None:
     """None if this mail may be scanned for commitments, else the reason it is skipped."""
-    mine = _mine(settings, email)
+    mine = _mine(session, settings, email)
     if _is_bulk(email):
         return "bulk_or_automatic"
     if email.direction == "out":
@@ -128,7 +129,7 @@ def _sender(email: Email) -> str:
 def store_draft(session: Session, email: Email, d: FollowupDraft, reason: str, settings: Settings) -> Followup | None:
     if session.scalar(select(Followup.id).where(Followup.dedupe_key == d.dedupe_key)):
         return None
-    mine = _mine(settings, email)
+    mine = _mine(session, settings, email)
     if email.direction == "out":
         people = _recipients(email, mine)
         counterparty = next((a for a in (email.to_addrs or []) if a.lower() not in mine), people[0] if people else None)
@@ -170,7 +171,7 @@ def extract_followups(session: Session, email: Email, client, settings: Settings
     if len(own) < 10:
         return []
     outgoing = email.direction == "out"
-    mine = _mine(settings, email)
+    mine = _mine(session, settings, email)
     msgs = fprompt.build_extract_messages(
         outgoing=outgoing, sender=_sender(email),
         recipients=", ".join(_recipients(email, mine)) if outgoing else "the user",
@@ -194,7 +195,7 @@ def extract_followups(session: Session, email: Email, client, settings: Settings
 # ------------------------------------------------------------------ resolution (proposed only)
 def closure_candidates(session: Session, email: Email, settings: Settings) -> list[Followup]:
     """Deterministic pre-filter: which open follow-ups could this newer mail fulfil?"""
-    mine = _mine(settings, email)
+    mine = _mine(session, settings, email)
     src = select(Email.sent_at).where(Email.id == Followup.email_id).scalar_subquery()
     q = select(Followup).where(Followup.status.in_(OPEN_STATUSES), Followup.closure_email_id.is_(None),
                                Followup.email_id != email.id)
@@ -227,7 +228,7 @@ def check_resolution(session: Session, email: Email, client, settings: Settings)
     own = own_text(email.body_text)
     if not cands or len(own) < 5:
         return []
-    mine = _mine(settings, email)
+    mine = _mine(session, settings, email)
     proposed: list[Followup] = []
     for f in cands:
         msgs = fprompt.build_close_messages(

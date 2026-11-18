@@ -1,12 +1,13 @@
 # Mail Assistant
 
 A self-hosted, privacy-first AI assistant for **Proton Mail** and **Google Calendar**. It reads your mail
-through Proton Mail Bridge, uses a **local** language model (Ollama) to sort it, finds appointments and
-commitments, and shows you proposals in a small web dashboard. It never sends, deletes or changes mail,
-and it never sends your mail to a cloud AI service.
+through Proton Mail Bridge (and, optionally, other IMAP accounts such as Microsoft 365 / Outlook.com), uses a
+**local** language model (Ollama) to sort it, finds appointments and commitments, and shows you proposals in a
+small web dashboard. It never sends mail or changes it on its own, and it never sends your mail to a cloud AI
+service.
 
-> **Suggestions only.** Nothing happens in your mailbox, and an event is only added to your calendar after
-> you approve it. Every decision is logged.
+> **Suggestions only.** Nothing happens in your mailbox unless you click it (the only thing you can do is move
+> mail to the Trash), and an event is only added to your calendar after you approve it. Every decision is logged.
 
 ## What it does
 
@@ -26,15 +27,22 @@ and it never sends your mail to a cloud AI service.
 - **Daily briefing**: today's calendar, overdue and due follow-ups, new proposals - on the dashboard and,
   optionally, as a Home Assistant notification on your phone.
 - **Dashboard** (HTTPS, password login) to confirm or reject proposals in bulk, approve events, correct
-  classifications and see the status of every component.
+  classifications, clean up marketing and newsletters (**Move to Trash**, selected or all shown) and see the
+  status of every component.
+- **More mailboxes**: add other IMAP accounts - Microsoft 365 / Outlook.com with a Microsoft sign-in
+  ([docs/MICROSOFT_SETUP.md](docs/MICROSOFT_SETUP.md)) or any IMAP server with a password. Their mail goes
+  through the same sorting, calendar and follow-up steps.
 
 Dutch and English mail are supported.
 
 ## Privacy and safety
 
 - **Local AI only.** All model calls go to Ollama on your own machine. No cloud AI APIs.
-- **Read-only mail access.** Bridge is opened read-only (`EXAMINE` / `BODY.PEEK`): nothing is marked as read,
-  moved or deleted. Bridge's TLS certificate is pinned.
+- **Read-only mail access.** Mailboxes are synchronised read-only (`EXAMINE` / `BODY.PEEK`): nothing is marked
+  as read, moved or deleted by the sync. Bridge's TLS certificate is pinned; other servers' certificates are
+  verified normally. The **only** change ever made to a mailbox is **Move to Trash** when you click it on the
+  Mail page and confirm: an IMAP `MOVE` to the account's Trash folder (recoverable there; never expunged), and only
+  for messages whose Message-ID on the server still matches.
 - **Mail is untrusted input.** The model has no tools and can only return schema-checked data; fixed rules in
   code decide what becomes a proposal. Prompt-injection attempts are detected and such mail is excluded.
   Quotes and dates the model reports must literally appear in the mail, or the proposal is dropped.
@@ -183,7 +191,7 @@ After changing `.env` or secrets: `docker compose --profile local-db up -d`.
 | **Add** | Paste, type or dictate an appointment or follow-up (e.g. a WhatsApp invitation); shows what was proposed or what was missing. |
 | **Follow-ups** | Tick items and **Confirm / Reject / Done** in one go. Per item: accept or dismiss a proposed closure, snooze, set a deadline, see the quoted evidence and history. |
 | **Calendar** | Each proposed event with conflicts and the evidence. **Approve → work** or **Approve → private** (the suggested calendar is highlighted). Approving is one at a time - each creates a real event after a fresh conflict check; rejecting works in bulk. **Edit** a proposal first if the time, date or title is not right. |
-| **Mail** | Recent mail per category with the model's reason; correct the category where it is wrong. |
+| **Mail** | Recent mail per category with the model's reason; correct the category where it is wrong. Tick mails (or use **Move all shown**) to move them to your mailbox's Trash after a confirm page. Mail with an open follow-up or calendar proposal is kept. A mail you restore from Trash shows up again. |
 | **Status** | Health of the worker, Ollama, Bridge, Google and Home Assistant; which calendars are used; queue and model statistics. |
 
 A typical day: read the briefing, confirm the follow-ups that are real and reject the rest, approve the
@@ -291,10 +299,31 @@ Compare your `.env` with `.env.example` for new settings.
 | Bridge "unavailable" | Bridge is not running or not logged in. Mail sync retries every few minutes. |
 | "certificate mismatch", sync blocked | Bridge got a new certificate: run `python3 scripts/imap_probe.py` and update `BRIDGE_CERT_SHA256`. |
 | Model calls deferred | Ollama is down, busy or the model is not pulled (`ollama list`). Jobs wait and retry; nothing is lost. |
+| Status: `mail:LABEL` "blocked: MicrosoftAuthError" | The Microsoft sign-in expired or was revoked: run `mail.accounts authorize LABEL` again. "AUTHENTICATE failed": IMAP is off for the mailbox or the organisation blocks the app (docs/MICROSOFT_SETUP.md). |
+| Move to Trash "skipped" | The mail had been moved or renumbered on the server since the last sync; nothing was changed. Try again after the next sync. |
 | Google `invalid_grant` | Access expired or was revoked: run `gcal.authorize` again (docs/GOOGLE_SETUP.md). |
 | Dashboard answers "unknown host name" | Add the name or address you use to `WEB_ALLOWED_HOSTS`. |
 | `setpassword` fails with "interactive terminal" | Run it in a normal terminal window, not through another program. |
 | `migrate` succeeds but no tables / `alembic history` empty | Files unreadable for the container user: `chmod -R go+rX migrations src`, then rebuild. |
+
+## Extra mail accounts
+
+Besides Proton (configured in `.env`), you can add other IMAP accounts. They are stored in the database and
+managed with a command in the worker container (it holds the encryption key; the dashboard does not):
+
+```sh
+# Microsoft 365 / Outlook.com (one-time app registration first: docs/MICROSOFT_SETUP.md)
+docker compose run --rm --no-deps worker python -m mailassistant.mail.accounts add --label work --address you@company.com
+docker compose run --rm --no-deps worker python -m mailassistant.mail.accounts authorize work   # sign in with a code
+docker compose run --rm --no-deps worker python -m mailassistant.mail.accounts test work        # shows the folders
+# any other IMAP server (password asked for, stored encrypted):
+docker compose run --rm --no-deps worker python -m mailassistant.mail.accounts add --label other \
+    --address you@example.org --auth password --host imap.example.org
+```
+
+The first sync of a new account only fetches the last `MAIL_BACKFILL_DAYS` (60) days. Trash, Junk, Drafts and
+Exchange's non-mail folders are skipped (`--include` / `--exclude` to change). `list`, `disable LABEL` and
+`enable LABEL` manage accounts; each account has its own row on the Status page.
 
 ## Running on a home server
 
@@ -313,7 +342,7 @@ moving an existing database: [docs/SERVER_SETUP.md](docs/SERVER_SETUP.md). Behin
 TEST_DATABASE_URL=postgresql+psycopg://mailassistant:PASSWORD@127.0.0.1:5433/mailtest .venv/bin/pytest
 ```
 
-- Code: `src/mailassistant/` - `mail/` (Bridge sync), `classify/`, `gcal/`, `followups/`, `web/`, `notify/`,
+- Code: `src/mailassistant/` - `mail/` (IMAP sync, accounts, Move to Trash), `classify/`, `gcal/`, `followups/`, `web/`, `notify/`,
   `jobs/` (Postgres job queue, worker, scheduler), `security/` (allowlist, injection signals).
 - Pure logic (parsing, policies, date handling, conflict checks) lives in standard-library modules that are
   tested without a database.
@@ -324,7 +353,7 @@ TEST_DATABASE_URL=postgresql+psycopg://mailassistant:PASSWORD@127.0.0.1:5433/mai
 
 ## Limitations
 
-- Suggestions only: archive suggestions are shown but not applied to the mailbox.
+- Archive suggestions are shown but not applied to the mailbox; the only mailbox change is Move to Trash.
 - Recurring invitations: only the first occurrence is proposed.
 - Working days are Monday-Friday (no public holidays); travel time is a fixed buffer, not a route.
 - A follow-up answered by a colleague of the person who owed it is not detected as closed.

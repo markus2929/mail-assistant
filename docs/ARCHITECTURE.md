@@ -13,6 +13,8 @@
 | 8 | Dashboard on the LAN over HTTPS (self-signed, `web.makecert`), login required; plain HTTP only on loopback | Changed 2026-11-17 (was 127.0.0.1 only) |
 | 9 | Google Cloud project is created in Phase 4 | |
 | 10 | **The dashboard is database-only** and may later run on a server | Changed 2026-11-17. Google/Ollama/Bridge work is queued for the worker (`gcal.approve`); health comes from `service_status` written by the worker |
+| 11 | **Move to Trash is the one mailbox change**, only by the user's click (Mail page + confirm page) | Added 2026-11-18 at the user's request. IMAP `UID MOVE` to the account's Trash (`\Trash` flag or known name); no `EXPUNGE`, no `\Deleted`, no fallback without MOVE. The worker re-reads Message-IDs and only moves UIDs that still match; UIDVALIDITY must be unchanged. Email rows stay in the DB (`mail_actions` records the request; the dashboard hides such mail until it reappears in a synced folder) |
+| 12 | **Several mail accounts**: the Proton account from `.env` plus extra IMAP accounts in `mail_accounts` (kind `imap`) | Added 2026-11-18. Microsoft 365 via OAuth2 device-code flow (own Entra app, public client, scope `IMAP.AccessAsUser.All offline_access`; refresh token Fernet-encrypted in `oauth_tokens`, rotated tokens saved); other servers with an encrypted password. IMAPS with normal certificate + host-name verification. Each account synced on its own (one failure never blocks another; status row `mail:LABEL`); first sync limited to `MAIL_BACKFILL_DAYS` before the account was added (IMAP `SEARCH SINCE`, fixed date). "My addresses" = `MY_ADDRESSES` + all accounts (`mail.accounts.own_addresses`) |
 
 Moving back to a server later only needs the mail source and LLM URLs changed (config), plus
 a tunnel; the code does not assume where Bridge or Ollama run.
@@ -22,8 +24,10 @@ a tunnel; the code does not assume where Bridge or Ollama run.
 
 ## Invariants (enforced in code, tested)
 - The LLM only returns schema-validated data; deterministic code decides what becomes a proposal.
-- `security/allowlist.py` is the complete list of actions. Sending, deleting, accepting
-  invitations and changing settings do not exist.
+- `security/allowlist.py` is the complete list of actions. Sending, permanently deleting, accepting
+  invitations and changing settings do not exist. `MOVE_TO_TRASH` exists only as a user click
+  (max level `apply_after_approval`); `mail/imap_bridge.MailWriter` is the only code that opens a mailbox
+  read-write and it can only `UID MOVE` to Trash (unit-tested: never EXPUNGE/STORE).
 - `CREATE_CALENDAR_EVENT` can never be configured above `apply_after_approval`.
 - `audit_log` is append-only (DB triggers, migration 0002).
 - Active jobs are unique per `dedupe_key`; failures back off exponentially; "LLM down" defers.

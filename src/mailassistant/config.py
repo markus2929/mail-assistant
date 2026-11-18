@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     # Starred are deliberately not included: every message lives in exactly one of the folders below.
     sync_include: Annotated[list[str], NoDecode] = ["INBOX", "Sent", "Archive", "Folders/*"]
     sync_exclude: Annotated[list[str], NoDecode] = ["Folders"]
+    # Extra accounts (mail.accounts CLI): how far back the first sync of a NEW account goes.
+    mail_backfill_days: int = 60
+    # Microsoft 365 / Outlook.com accounts: the "Application (client) ID" of your own Entra app registration
+    # (docs/MICROSOFT_SETUP.md). Public client, device-code sign-in; no client secret.
+    microsoft_client_id: str = ""
+    microsoft_tenant: str = "common"   # "common" = work/school + personal accounts; or your tenant ID
     folder_sent: str = "Sent"
     folder_archive: str = "Archive"
 

@@ -67,7 +67,8 @@ def create_capture(session: Session, text: str, kind: str, source: str, settings
 def register_mail_captures(session: Session, settings: Settings, days: int = 7, limit: int = 50) -> list[int]:
     """Mail the user SENT (it is in a Sent mailbox, so nobody else can inject captures) to a capture address
     (me+agenda@…) or to themself with "agenda: …" / "todo: …" in the subject."""
-    own = [a.lower() for a in settings.my_addresses]
+    from mailassistant.mail.accounts import own_addresses
+    own = own_addresses(session, settings)
     if not own:
         return []
     in_sent = exists(select(EmailLocation.id).join(Mailbox, Mailbox.id == EmailLocation.mailbox_id).where(
@@ -79,7 +80,7 @@ def register_mail_captures(session: Session, settings: Settings, days: int = 7, 
     made: list[int] = []
     for e in rows:
         kind = capture_kind(to_addrs=list(e.to_addrs or []), cc_addrs=list(e.cc_addrs or []), subject=e.subject,
-                            capture_addresses=settings.capture_addresses, own_addresses=settings.my_addresses)
+                            capture_addresses=settings.capture_addresses, own_addresses=own)
         if kind is None:
             continue
         now = utcnow()

@@ -28,7 +28,8 @@ from mailassistant import __version__
 from mailassistant.config import Settings, get_settings
 from mailassistant.db import audit
 from mailassistant.db.models import (AuditLog, Briefing, Capture, Classification, Email, EventProposal, Followup,
-                                     FollowupEvent, Job, LlmCall, ProposedAction, ServiceStatus, WebSession)
+                                     FollowupEvent, Job, LlmCall, MailAccount, MailAction, ProposedAction,
+                                     ServiceStatus, WebSession)
 from mailassistant.db.session import session_scope, utcnow
 from mailassistant.web.auth import LoginThrottle, new_token, same, token_hash, verify_password
 
@@ -118,7 +119,7 @@ def _host_allowed(host_header: str, allowed: list[str]) -> bool:
 
 async def _form(request: Request) -> dict[str, list[str]]:
     body = (await request.body()).decode("utf-8", "replace")
-    return parse_qs(body, keep_blank_values=True, max_num_fields=500)
+    return parse_qs(body, keep_blank_values=True, max_num_fields=600)
 
 
 @app.middleware("http")
@@ -394,27 +395,95 @@ def calendar_approve(request: Request, pid: int):
 
 
 # ------------------------------------------------------------------ mail / classification corrections
+def _mail_query(category: str, days: int):
+    """The Mail page's list. Also used by "Move all shown to Trash", so it acts on exactly what was shown."""
+    from mailassistant.mail.trash import hidden_clause
+
+    q = (select(Email, Classification).join(Classification, (Classification.email_id == Email.id)
+                                            & Classification.is_current.is_(True))
+         .where(Email.direction == "in", func.coalesce(Email.sent_at, Email.received_at) > utcnow() - timedelta(days=days),
+                ~hidden_clause()))
+    if category in CATEGORIES:
+        q = q.where(Classification.category == category)
+    return q.order_by(func.coalesce(Email.sent_at, Email.received_at).desc()).limit(200)
+
+
+def _account_labels(d: Session) -> dict[int, str]:
+    """{account id: short label}, empty when there is only one account (then no tags are shown)."""
+    accts = d.scalars(select(MailAccount)).all()
+    if len(accts) < 2:
+        return {}
+    return {a.id: (a.label or ("proton" if a.kind == "proton_bridge" else a.address)) for a in accts}
+
+
 @app.get("/mail", response_class=HTMLResponse)
 def mail(request: Request, category: str = "manual_review", days: int = 14):
+    from mailassistant.mail.trash import hidden_clause
+
     days = max(1, min(days, 60))
     with db() as d:
-        q = (select(Email, Classification).join(Classification, (Classification.email_id == Email.id)
-                                                & Classification.is_current.is_(True))
-             .where(Email.direction == "in", func.coalesce(Email.sent_at, Email.received_at) > utcnow() - timedelta(days=days)))
-        if category in CATEGORIES:
-            q = q.where(Classification.category == category)
-        rows = d.execute(q.order_by(func.coalesce(Email.sent_at, Email.received_at).desc()).limit(200)).all()
+        rows = d.execute(_mail_query(category, days)).all()
         ids = [e.id for e, _ in rows]
         actions: dict[int, list[str]] = {}
         for a in d.scalars(select(ProposedAction).where(ProposedAction.email_id.in_(ids),
                                                         ProposedAction.status == "proposed")):
             actions.setdefault(a.email_id, []).append(a.action_type)
         counts = dict(d.execute(select(Classification.category, func.count()).join(Email, Email.id == Classification.email_id)
-                                .where(Classification.is_current.is_(True),
+                                .where(Classification.is_current.is_(True), Email.direction == "in", ~hidden_clause(),
                                        func.coalesce(Email.sent_at, Email.received_at) > utcnow() - timedelta(days=days))
                                 .group_by(Classification.category)).all())
+        trash_queue = d.scalar(select(func.count()).select_from(MailAction).where(MailAction.status == "requested"))
+        accounts = _account_labels(d)
     return render(request, "mail.html", rows=rows, category=category, days=days, categories=CATEGORIES,
-                  counts=counts, actions=actions)
+                  counts=counts, actions=actions, trash_queue=trash_queue, accounts=accounts)
+
+
+@app.post("/mail/trash", response_class=HTMLResponse)
+def mail_trash_confirm(request: Request):
+    """Step 1: show what would be moved (nothing changes yet)."""
+    from mailassistant.mail.trash import MAX_PER_REQUEST, TrashError, select_for_trash
+
+    category = form_value(request, "category", "manual_review")
+    try:
+        days = max(1, min(int(form_value(request, "days", "14")), 60))
+    except ValueError:
+        days = 14
+    back = f"/mail?category={quote(category)}&days={days}"
+    with db() as d:
+        if form_value(request, "scope") == "shown":
+            ids = [e.id for e, _ in d.execute(_mail_query(category, days)).all()]
+        else:
+            ids = form_ids(request)
+        if not ids:
+            return redirect(back, "Select one or more mails first.")
+        try:
+            sel = select_for_trash(d, ids)
+        except TrashError as e:
+            return redirect(back, str(e))
+        accounts = _account_labels(d)
+        eligible = [(e.id, e.subject, e.from_addr, e.account_id) for e in sel.eligible]
+        kept = [(e.id, e.subject, e.from_addr, why) for e, why in sel.kept]
+    return render(request, "mail_trash.html", eligible=eligible, kept=kept, back=back, accounts=accounts,
+                  max_per_request=MAX_PER_REQUEST)
+
+
+@app.post("/mail/trash/confirm")
+def mail_trash_do(request: Request):
+    """Step 2: the user confirmed. Record + queue; the worker moves the mails to Trash."""
+    from mailassistant.mail.trash import TrashError, request_trash
+
+    back = form_value(request, "back", "/mail")
+    back = back if back.startswith("/mail") else "/mail"
+    ids = form_ids(request)
+    if not ids:
+        return redirect(back, "Nothing to move.")
+    try:
+        with db() as d:
+            n = request_trash(d, ids, actor="user")
+    except TrashError as e:
+        return redirect(back, str(e))
+    return redirect(back, f"{n} mail(s) queued: the worker moves them to the Trash folder of your mailbox "
+                          "(recoverable there).")
 
 
 @app.post("/mail/{email_id}/category")
@@ -582,11 +651,14 @@ def status(request: Request):
         cals = resolved_calendars(d)
         last_briefing = d.scalar(select(func.max(Briefing.briefing_date)))
         last_push = d.scalar(select(func.max(AuditLog.at)).where(AuditLog.action == "ha_notified"))
+        trash_failed = d.scalar(select(func.count()).select_from(MailAction).where(
+            MailAction.status.in_(("failed", "skipped")), MailAction.done_at > now - timedelta(days=7)))
     worker = comps.get("worker")
     worker_age = (now - worker.checked_at) if worker else None
     return render(request, "status.html", comps=comps, jobs=jobs, dead=dead, llm=llm, worker_age=worker_age,
                   stale=worker_age is None or worker_age > timedelta(minutes=5), last_briefing=last_briefing,
-                  last_push=last_push, now=now, error_class=lambda e: (e or "").split("(")[0][:80], cals=cals)
+                  last_push=last_push, now=now, error_class=lambda e: (e or "").split("(")[0][:80], cals=cals,
+                  trash_failed=trash_failed, mail_components=sorted(k for k in comps if k.startswith("mail:")))
 
 
 @app.post("/status/test-notification")

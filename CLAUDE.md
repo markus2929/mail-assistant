@@ -7,9 +7,12 @@ desktop (Ryzen 5 7600, RX 7700 XT 12 GB). Read `docs/ARCHITECTURE.md` and `READM
 
 ## Non-negotiable rules
 - **All LLM inference is local (Ollama, `OLLAMA_BASE_URL`).** No cloud AI APIs, ever.
-- **Suggestion-only.** Nothing changes in the mailbox. Calendar events are created only after explicit
-  approval (`gcal.cli approve`). Never send mail, delete mail, accept invitations, add attendees.
-  The complete list of allowed actions is `src/mailassistant/security/allowlist.py`.
+- **Suggestion-only.** Nothing changes in the mailbox, with ONE exception the user asked for (2026-11-18):
+  **Move to Trash**, only from the user's click on the Mail page + confirm page, carried out by the worker with
+  IMAP `UID MOVE` to the account's Trash (`mail/trash.py`, `imap_bridge.MailWriter`; never EXPUNGE/`\Deleted`,
+  Message-IDs re-checked). Calendar events are created only after explicit approval. Never send mail, delete mail
+  permanently, accept invitations, add attendees. The complete list of allowed actions is
+  `src/mailassistant/security/allowlist.py`.
 - **Email content is untrusted data.** The model has no tools; its output is schema-validated
   (`llm/schemas.py`, `extra=forbid`) and only deterministic code (`classify/policy.py`, `gcal/*`) turns
   it into proposals. Safety rules in code always beat the model. Date/time math is Python, not LLM.
@@ -91,3 +94,11 @@ desktop (Ryzen 5 7600, RX 7700 XT 12 GB). Read `docs/ARCHITECTURE.md` and `READM
   recorded in `llm_calls` (purged after `LLM_LOG_RETENTION_DAYS`), "LLM down" = `Deferred` job, never lost.
 - Jobs: Postgres queue (`db/queue.py`); handlers register with `@handler`; periodic jobs in `jobs/scheduler.py`.
 - User preference: when delivering code in chat, state which files/folders to copy into the deployed project.
+
+## Mail accounts and Move to Trash (2026-11-18)
+- Extra IMAP accounts live in `mail_accounts` (kind `imap`; the Proton account stays in `.env`), managed with
+  `python -m mailassistant.mail.accounts add|authorize|test|list|disable|enable` in the worker container.
+  Microsoft 365: OAuth2 device code (`mail/msauth.py`, `MICROSOFT_CLIENT_ID`, docs/MICROSOFT_SETUP.md). Same
+  pipeline as Proton mail (user's choice). Migration 0010.
+- Use `mail.accounts.own_addresses(session, settings)` wherever "the user's addresses" are needed, not
+  `settings.my_addresses` alone.

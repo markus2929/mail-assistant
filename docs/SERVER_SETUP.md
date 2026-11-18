@@ -154,6 +154,11 @@ Docker network (see the previous section). Example for SWAG: [examples/swag-assi
   login throttle sees the real client address) and, if you like, `DASHBOARD_URL=https://<subdomain>`.
 Note: certificate names are public (certificate transparency logs) - the name is visible, the dashboard is not reachable.
 
+## More mailboxes (Microsoft 365, other IMAP)
+Extra accounts are added on the server with `python -m mailassistant.mail.accounts` in the worker container; see
+the README section "Extra mail accounts" and [MICROSOFT_SETUP.md](MICROSOFT_SETUP.md). The Microsoft sign-in uses
+a code you enter on any device, so it works on a server without a browser.
+
 ## Backups
 Back up the server's `secrets/`, `.env` and the two volumes (`pgdata`, `bridge`), e.g. a nightly
 `docker compose exec -T db pg_dump -U mailassistant -Fc mailassistant > backup.dump` to an encrypted location.
