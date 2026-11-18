@@ -85,7 +85,8 @@ OLLAMA_CERT_SHA256=<fingerprint from step 4>
 WEB_ALLOWED_HOSTS=<line printed in step 2>
 DASHBOARD_URL=<line printed in step 2>
 ```
-Remove `WEB_HOST`/`WEB_PORT` if present (the compose file sets them). Then the Bridge certificate pin:
+Remove `WEB_HOST` if present (the compose file sets it). If port 8443 is already used on the server (a UniFi
+controller uses it, for example), add `WEB_PUBLISH_PORT=8444` and use that port in `DASHBOARD_URL` and in Home Assistant. Then the Bridge certificate pin:
 ```sh
 docker compose run --rm --no-deps worker python scripts/imap_probe.py     # prints "cert sha256: ..."
 ```

@@ -59,7 +59,7 @@ services:
     command: ["python", "-m", "mailassistant.web"]
     environment:
       WEB_HOST: 0.0.0.0                   # inside the container; reachable through the published port
-    ports: ["8443:8443"]
+    ports: ["${WEB_PUBLISH_PORT:-8443}:8443"]   # outside port; set WEB_PUBLISH_PORT in .env if 8443 is taken
     # Database only - no Google/IMAP/Ollama/Fernet secrets (the dashboard never talks to those)
     secrets: [database_url, web_password_hash, web_tls_cert, web_tls_key, capture_token]
     depends_on:
