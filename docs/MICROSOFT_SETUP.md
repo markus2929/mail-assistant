@@ -21,9 +21,12 @@ register apps in; the sign-in itself then works with the personal account.
    **Directory (tenant) ID**).
 4. **Authentication** → *Advanced settings* → **Allow public client flows: Yes** → Save
    (this enables the sign-in with a code; there is no client secret).
-5. **API permissions → Add a permission → APIs my organization uses** → search **Office 365 Exchange Online**
-   → *Delegated permissions* → tick **IMAP.AccessAsUser.All** → Add. (`offline_access` is requested at sign-in.)
-   If your organisation requires it, an administrator clicks **Grant admin consent**.
+5. **API permissions → Add a permission → Microsoft Graph → Delegated permissions** → type `IMAP` in the search
+   box → under *IMAP* tick **IMAP.AccessAsUser.All** → Add permissions. (Microsoft lists it under Microsoft Graph;
+   in older tenants it may instead be under *APIs my organization uses → Office 365 Exchange Online*.)
+   `offline_access` is requested at sign-in. If your organisation requires it, an administrator clicks
+   **Grant admin consent**. If you cannot find the permission at all, skip this step: the permission is also
+   requested during sign-in, and you (or an admin) approve it then.
 
 IMAP must also be enabled for the mailbox. In most organisations it is; if not, an administrator turns it on in
 the Exchange admin center → *Mailboxes* → your mailbox → *Manage email apps* → **IMAP**.
