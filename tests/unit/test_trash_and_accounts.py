@@ -188,3 +188,37 @@ def test_refresh_errors_are_classified():
         msauth.refresh(ST, "RT", opener=opener)
     opener, _ = opener_for([(200, {"access_token": "AT2", "refresh_token": "RT2"})])
     assert msauth.refresh(ST, "RT", opener=opener)["access_token"] == "AT2"
+
+
+# ------------------------------------------------------------------ Microsoft browser sign-in (code + PKCE)
+def test_browser_sign_in_url_and_pasted_address():
+    import urllib.parse
+    url = msauth.build_auth_url(ST, "STATE", "CHAL", "me@company.com")
+    q = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(url).query))
+    assert url.startswith("https://login.microsoftonline.com/common/oauth2/v2.0/authorize?")
+    assert q["redirect_uri"] == "http://localhost" and q["code_challenge_method"] == "S256"
+    assert q["client_id"] == "cid-123" and "IMAP.AccessAsUser.All" in q["scope"] and q["login_hint"] == "me@company.com"
+    assert msauth.code_from_redirect(" http://localhost/?code=ABC&state=STATE&session_state=x ", "STATE") == "ABC"
+    assert msauth.code_from_redirect("?code=ABC&state=STATE", "STATE") == "ABC"
+    with pytest.raises(msauth.MicrosoftAuthError, match="state mismatch"):
+        msauth.code_from_redirect("http://localhost/?code=ABC&state=OTHER", "STATE")
+    with pytest.raises(msauth.MicrosoftAuthError, match="53003"):
+        msauth.code_from_redirect("http://localhost/?error=access_denied&error_description=AADSTS53003+blocked", "STATE")
+    with pytest.raises(msauth.MicrosoftAuthError, match="no code"):
+        msauth.code_from_redirect("http://localhost/", "STATE")
+
+
+def test_browser_login_exchanges_the_code_with_the_verifier():
+    import urllib.parse
+    opener, calls = opener_for([(200, {"access_token": "AT", "refresh_token": "RT"})])
+    shown = []
+
+    def ask(prompt):
+        url = shown[0].split("\n")[3]
+        state = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(url).query))["state"]
+        return f"http://localhost/?code=THECODE&state={state}"
+    tok = msauth.browser_login(ST, shown.append, ask, opener=opener)
+    assert tok["refresh_token"] == "RT"
+    body = dict(urllib.parse.parse_qsl(calls[0][1]))
+    assert body["grant_type"] == "authorization_code" and body["code"] == "THECODE" and len(body["code_verifier"]) > 40
+    assert "client_secret" not in body

@@ -4,7 +4,7 @@ Extra accounts are managed in the WORKER container (it has the Fernet key; the d
 
     docker compose run --rm --no-deps worker python -m mailassistant.mail.accounts add \\
         --label work --address you@company.com --auth microsoft_oauth
-    docker compose run --rm --no-deps worker python -m mailassistant.mail.accounts authorize work
+    docker compose run --rm --no-deps worker python -m mailassistant.mail.accounts authorize work [--browser]
     docker compose run --rm --no-deps worker python -m mailassistant.mail.accounts test work
     ... list | disable LABEL | enable LABEL | folders LABEL
 
@@ -191,13 +191,16 @@ def cmd_add(session: Session, settings: Settings, a) -> str:
     return f"Account {a.label!r} added. Next: python -m mailassistant.mail.accounts {nxt}"
 
 
-def cmd_authorize(session: Session, settings: Settings, label: str) -> str:
+def cmd_authorize(session: Session, settings: Settings, label: str, browser: bool = False) -> str:
     from mailassistant.mail import msauth
 
     acct = _get(session, label)
     if acct.auth != "microsoft_oauth":
         raise AccountError("only Microsoft accounts are authorised this way")
-    tok = msauth.device_login(settings, print)
+    if browser:
+        tok = msauth.browser_login(settings, print, input, login_hint=acct.username or acct.address)
+    else:
+        tok = msauth.device_login(settings, print)
     save_ms_refresh_token(session, settings, label, tok["refresh_token"], tok.get("scope", "").split())
     return f"Authorisation for {label!r} stored (encrypted). Next: python -m mailassistant.mail.accounts test {label}"
 
@@ -252,7 +255,11 @@ def main(argv: list[str] | None = None) -> int:
     add.add_argument("--include", help="folders to sync (fnmatch patterns, comma-separated; default: all)")
     add.add_argument("--exclude", help="folders to skip (default: Exchange's non-mail folders)")
     sub.add_parser("list")
-    for name in ("authorize", "test", "disable", "enable"):
+    auth = sub.add_parser("authorize", help="sign in (Microsoft accounts)")
+    auth.add_argument("label")
+    auth.add_argument("--browser", action="store_true",
+                      help="sign in with a link and paste the address back (when sign-in with a code is blocked)")
+    for name in ("test", "disable", "enable"):
         sub.add_parser(name).add_argument("label")
     a = ap.parse_args(argv)
     s = get_settings()
@@ -262,7 +269,7 @@ def main(argv: list[str] | None = None) -> int:
                 out = cmd_add(session, s, a)
                 audit.record(session, actor="user", action="mail_account_added", detail=a.label)
             elif a.cmd == "authorize":
-                out = cmd_authorize(session, s, a.label)
+                out = cmd_authorize(session, s, a.label, browser=a.browser)
                 audit.record(session, actor="user", action="mail_account_authorized", detail=a.label)
             elif a.cmd == "test":
                 out = cmd_test(session, s, a.label)
