@@ -66,9 +66,8 @@ def mail_sync(payload: dict) -> None:
         try:
             detail, ok = _sync_one(s, account_id, bool(payload.get("full")))
             _status(component, ok, detail)
-        except AccountError as e:
+        except AccountError as e:   # not set up (yet): show it, but do not hold up the other accounts' sync
             _status(component, False, str(e)[:200])
-            retry.append(label)
         except TRANSIENT as e:   # Bridge not running yet / server or network down
             _status(component, False, f"unavailable ({type(e).__name__})")
             retry.append(label)
