@@ -30,8 +30,10 @@ deployment details are in `CLAUDE.local.md` (not committed; this repository is p
 - Optional fallback Ollama on the server (compose profile `server-llm`, `OLLAMA_FALLBACK_URL`/`OLLAMA_FALLBACK_MODEL`):
   build model clients with `llm.fallback.llm_client(settings, task)`, never `OllamaClient.from_settings` directly in
   handlers; store `served_by` from the client on new classifications/follow-ups/event proposals.
-- Ollama models: classification `OLLAMA_MODEL=dolphin3:latest` (fast); follow-ups
-  `FOLLOWUP_OLLAMA_MODEL=qwen3-14b-16k:latest` (dolphin3 produced mostly noise there). Context requested per call: `OLLAMA_NUM_CTX=8192`.
+- Ollama models (2026-11-20, chosen with the evaluations): desktop `qwen3.5:9b` for every task (fits the 12 GB GPU
+  fully: classification 23/24, follow-ups 17/17, 0 CRIT, 2.4 s; replaced dolphin3 + qwen3-14b-16k, which spilled to
+  the CPU); server fallback `qwen3.5:4b` on CPU (23/24, 16/17, 0 CRIT; ~40-70 s per mail; qwen3:4b 12/17,
+  gemma3:4b 1 CRIT on follow-ups). Context requested per call: `OLLAMA_NUM_CTX=8192`.
 - Mail is Dutch + English; own addresses come from `MY_ADDRESSES` + `mail_accounts` (`own_addresses`);
   timezone `TIMEZONE` (Europe/Amsterdam). Synced Bridge folders: INBOX, Sent, Archive, `Folders/*`. "Ads" is a Proton *label* (`Labels/Ads`); labels/Spam/Trash/All Mail are not synced.
 - Tests: `pip install -e '.[dev]'`; `pytest tests/unit` needs nothing. DB tests need an EMPTY throwaway
