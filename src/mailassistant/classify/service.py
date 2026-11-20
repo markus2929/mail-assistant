@@ -74,6 +74,7 @@ def classify_email(session: Session, email_id: int, client, settings: Settings) 
         email_id=email_id, category=d.category, importance=d.importance,
         confidence=Decimal(f"{d.confidence:.3f}"), reasons=d.reasons, safety_flags=d.safety_flags,
         injection_flag=d.injection_flag, model=getattr(client, "model", None),
+        served_by=getattr(client, "served_by", None),
         prompt_version=result.prompt_version, source=d.source, is_current=True)
     session.add(row)
 

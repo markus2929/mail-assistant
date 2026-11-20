@@ -12,7 +12,8 @@ from mailassistant.db.session import session_scope, utcnow
 from mailassistant.followups.briefing import build_briefing
 from mailassistant.followups.service import pending_scan_email_ids, scan_email
 from mailassistant.jobs.registry import Deferred, handler
-from mailassistant.llm.client import LLMModelMissing, LLMUnavailable, OllamaClient
+from mailassistant.llm.client import LLMModelMissing, LLMUnavailable
+from mailassistant.llm.fallback import llm_client
 
 log = logging.getLogger(__name__)
 _down_until = 0.0          # circuit breaker: while Ollama is down, don't hammer it
@@ -40,9 +41,7 @@ def followups_scan_email(payload: dict) -> None:
     if time.monotonic() < _down_until:
         raise Deferred("ollama unavailable (waiting)", timedelta(minutes=3))
     s = get_settings()
-    client = OllamaClient.from_settings(s)
-    if s.followup_ollama_model:
-        client.model = s.followup_ollama_model
+    client = llm_client(s, "followup")
     try:
         with session_scope() as session:
             made, closed = scan_email(session, int(payload["email_id"]), client, s)

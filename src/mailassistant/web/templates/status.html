@@ -7,7 +7,7 @@
 <table class="list">
   <thead><tr><th>Component</th><th>State</th><th>Detail</th><th>Checked</th></tr></thead>
   <tbody>
-  {% for name in ['worker', 'ollama', 'bridge'] + mail_components + ['google', 'homeassistant'] %}{% set c = comps.get(name) %}
+  {% for name in ['worker', 'ollama'] + llm_components + ['bridge'] + mail_components + ['google', 'homeassistant'] %}{% set c = comps.get(name) %}
   <tr><td>{{ name }}</td>
       <td>{% if c %}<span class="tag {{ 'ok' if c.ok else 'hot' }}">{{ 'ok' if c.ok else 'problem' }}</span>{% else %}<span class="muted">no report</span>{% endif %}</td>
       <td class="small">{{ c.detail if c else '' }}</td><td class="small nowrap">{{ c.checked_at|local if c else '' }}</td></tr>

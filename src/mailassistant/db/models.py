@@ -172,6 +172,7 @@ class Classification(Base):
     injection_flag: Mapped[bool] = mapped_column(Boolean, server_default="false")
     model: Mapped[str | None] = mapped_column(Text)
     prompt_version: Mapped[str | None] = mapped_column(Text)
+    served_by: Mapped[str | None] = mapped_column(Text)   # "desktop" | "server" (fallback Ollama) | None
     source: Mapped[str] = mapped_column(String(10))
     is_current: Mapped[bool] = mapped_column(Boolean, server_default="true")
     created_at: Mapped[datetime] = mapped_column(TZ, server_default=NOW)
@@ -233,6 +234,7 @@ class EventProposal(Base):
     status: Mapped[str] = mapped_column(String(12), server_default="proposed")
     google_event_id: Mapped[str | None] = mapped_column(Text)
     dedupe_key: Mapped[str] = mapped_column(Text, unique=True)
+    served_by: Mapped[str | None] = mapped_column(Text)   # "desktop" | "server" (fallback Ollama) | None
     notes: Mapped[list[Any]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     created_at: Mapped[datetime] = mapped_column(TZ, server_default=NOW)
     decided_at: Mapped[datetime | None] = mapped_column(TZ)
@@ -294,6 +296,7 @@ class Followup(Base):
     notes: Mapped[list[Any]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     notified_at: Mapped[datetime | None] = mapped_column(TZ)  # pushed to Home Assistant (Phase 6)
     dedupe_key: Mapped[str | None] = mapped_column(Text, unique=True)
+    served_by: Mapped[str | None] = mapped_column(Text)   # "desktop" | "server" (fallback Ollama) | None
     created_at: Mapped[datetime] = mapped_column(TZ, server_default=NOW)
     updated_at: Mapped[datetime] = mapped_column(TZ, server_default=NOW, onupdate=NOW)
 

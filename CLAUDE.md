@@ -27,6 +27,9 @@ deployment details are in `CLAUDE.local.md` (not committed; this repository is p
   Proton Bridge app on 127.0.0.1:1143, Ollama on 127.0.0.1:11434, optional `db` profile on 127.0.0.1:5433).
   Bridge's certificate is **pinned** via `BRIDGE_CERT_SHA256`, the Ollama proxy's via `OLLAMA_CERT_SHA256`.
   Secrets are files in `./secrets/`.
+- Optional fallback Ollama on the server (compose profile `server-llm`, `OLLAMA_FALLBACK_URL`/`OLLAMA_FALLBACK_MODEL`):
+  build model clients with `llm.fallback.llm_client(settings, task)`, never `OllamaClient.from_settings` directly in
+  handlers; store `served_by` from the client on new classifications/follow-ups/event proposals.
 - Ollama models: classification `OLLAMA_MODEL=dolphin3:latest` (fast); follow-ups
   `FOLLOWUP_OLLAMA_MODEL=qwen3-14b-16k:latest` (dolphin3 produced mostly noise there). Context requested per call: `OLLAMA_NUM_CTX=8192`.
 - Mail is Dutch + English; own addresses come from `MY_ADDRESSES` + `mail_accounts` (`own_addresses`);

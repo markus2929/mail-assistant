@@ -14,7 +14,8 @@ from mailassistant.gcal.service import (ConflictsFound, ProposalError, approve_a
                                         scan_email, sync_calendar)
 from mailassistant.gcal.tokens import calendar_client
 from mailassistant.jobs.registry import Deferred, handler
-from mailassistant.llm.client import LLMModelMissing, LLMUnavailable, OllamaClient
+from mailassistant.llm.client import LLMModelMissing, LLMUnavailable
+from mailassistant.llm.fallback import llm_client
 
 log = logging.getLogger(__name__)
 _down_until = 0.0
@@ -66,7 +67,7 @@ def gcal_scan_email(payload: dict) -> None:
     if time.monotonic() < _down_until:
         raise Deferred("ollama unavailable (waiting)", timedelta(minutes=3))
     s = get_settings()
-    client = OllamaClient.from_settings(s)
+    client = llm_client(s, "event")
     try:
         with session_scope() as session:
             made = scan_email(session, int(payload["email_id"]), client, s)

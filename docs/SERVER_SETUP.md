@@ -159,6 +159,26 @@ Extra accounts are added on the server with `python -m mailassistant.mail.accoun
 the README section "Extra mail accounts" and [MICROSOFT_SETUP.md](MICROSOFT_SETUP.md). The Microsoft sign-in uses
 a code you enter on any device, so it works on a server without a browser.
 
+## Ollama on the server (fallback while the desktop is off)
+Optional. The server runs a small model on its CPU; the desktop is always tried first. In `.env`:
+```sh
+COMPOSE_PROFILES=server-llm
+OLLAMA_FALLBACK_URL=http://mailassistant-ollama:11434
+OLLAMA_FALLBACK_MODEL=<model>
+# OLLAMA_SERVER_CPUS=3  OLLAMA_SERVER_MEMORY=6g   (limits; the rest of the server stays responsive)
+```
+```sh
+docker compose up -d ollama
+docker compose exec ollama ollama pull <model>
+# compare candidates first (one at a time; on a CPU each run takes a while):
+docker compose run --rm --no-deps -e OLLAMA_TIMEOUT_SECONDS=900 worker python -m mailassistant.classify.evaluate --base-url http://mailassistant-ollama:11434 --model <model>
+docker compose run --rm --no-deps -e OLLAMA_TIMEOUT_SECONDS=900 worker python -m mailassistant.followups.evaluate --base-url http://mailassistant-ollama:11434 --model <model>
+docker compose up -d   # worker picks up the settings
+```
+Choose a model that fits in the memory limit with room for the context (about 4B parameters, Q4, for 6 GB). The
+container is not published and has no token: only services in this compose network reach it. The Status page shows
+a row `ollama:server`; results from it carry a "server model" tag in the dashboard.
+
 ## Backups
 `scripts/backup.sh [DIR]` writes a database dump (checked with `pg_restore --list`) and a copy of `.env` +
 `secrets/` to `DIR` (default `~/backups/mail-assistant`) and removes backups older than `BACKUP_KEEP_DAYS` (14).

@@ -279,7 +279,15 @@ docker compose run --rm --no-deps worker python -m mailassistant.followups.evalu
 ```
 
 In practice a fast small model is fine for classification, while follow-up detection needs a careful model:
-with a small model most follow-ups turned out to be noise.
+with a small model most follow-ups turned out to be noise. Pick a model that fits completely in your GPU's memory
+(check with `ollama ps`: "100% GPU"); a model that spills over to the CPU is several times slower.
+
+### A fallback model when the desktop is off
+With the home-server layout, AI work normally waits while the desktop is off. Optionally, the server runs its own
+small Ollama on the CPU (`COMPOSE_PROFILES=server-llm`, `OLLAMA_FALLBACK_URL`, `OLLAMA_FALLBACK_MODEL`): the desktop
+is always tried first; when it does not answer, classification, follow-ups, calendar proposals and captures use the
+server model instead (slower, and a small model is less careful). Its results are final; the dashboard marks them
+with a **server model** tag, so you know to look twice. Setup: [docs/SERVER_SETUP.md](docs/SERVER_SETUP.md).
 
 ## Updating
 

@@ -10,7 +10,8 @@ from mailassistant.db import queue
 from mailassistant.db.models import Job
 from mailassistant.db.session import session_scope
 from mailassistant.jobs.registry import Deferred, handler
-from mailassistant.llm.client import LLMModelMissing, LLMUnavailable, OllamaClient
+from mailassistant.llm.client import LLMModelMissing, LLMUnavailable
+from mailassistant.llm.fallback import llm_client
 
 log = logging.getLogger(__name__)
 _down_until = 0.0          # circuit breaker: while Ollama is down, don't hammer it
@@ -23,7 +24,7 @@ def classify_email_job(payload: dict) -> None:
     if time.monotonic() < _down_until:
         raise Deferred("ollama unavailable (waiting)", timedelta(minutes=3))
     s = get_settings()
-    client = OllamaClient.from_settings(s)
+    client = llm_client(s, "classify")
     try:
         with session_scope() as session:
             classify_email(session, int(payload["email_id"]), client, s)

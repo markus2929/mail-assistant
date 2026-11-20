@@ -18,11 +18,15 @@ log = logging.getLogger(__name__)
 def ping(payload: dict) -> None:
     """Heartbeat for the dashboard (which only reads the database): worker alive, Ollama reachable."""
     from mailassistant.llm.client import OllamaClient
+    from mailassistant.llm.fallback import fallback_client
 
     s = get_settings()
     client = OllamaClient.from_settings(s)
     ollama_ok = client.healthy()
-    models = ", ".join(dict.fromkeys(m for m in (s.ollama_model, s.followup_ollama_model) if m))
+    models = ", ".join(dict.fromkeys(m for m in (s.ollama_model, s.followup_ollama_model,
+                                                 s.capture_voice_followup_model) if m))
+    fb = fallback_client(s)
+    fb_ok = fb.healthy() if fb is not None else False
     with session_scope() as session:
         queued = session.scalar(select(func.count()).select_from(Job).where(Job.status == "queued")) or 0
         dead = session.scalar(select(func.count()).select_from(Job).where(
@@ -30,12 +34,17 @@ def ping(payload: dict) -> None:
         set_status(session, "worker", True, f"queued={queued} dead_24h={dead}")
         if ollama_ok:
             detail = f"models: {models}"
+        elif fb_ok:
+            detail = "not reachable - the desktop is probably off; the server model takes over meanwhile"
         elif urlparse(s.ollama_base_url).hostname not in ("127.0.0.1", "localhost", "::1"):
             detail = ("not reachable - the machine with Ollama (desktop) is probably off; AI work waits in the "
                       "queue and continues when it is back")
         else:
             detail = "not reachable"
         set_status(session, "ollama", ollama_ok, detail)
+        if fb is not None:
+            set_status(session, "ollama:server", fb_ok,
+                       f"fallback model: {fb.model}" + ("" if fb_ok else " - not reachable (docker compose ps ollama)"))
     log.info("ping ok")
 
 

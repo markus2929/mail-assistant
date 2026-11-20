@@ -658,7 +658,8 @@ def status(request: Request):
     return render(request, "status.html", comps=comps, jobs=jobs, dead=dead, llm=llm, worker_age=worker_age,
                   stale=worker_age is None or worker_age > timedelta(minutes=5), last_briefing=last_briefing,
                   last_push=last_push, now=now, error_class=lambda e: (e or "").split("(")[0][:80], cals=cals,
-                  trash_failed=trash_failed, mail_components=sorted(k for k in comps if k.startswith("mail:")))
+                  trash_failed=trash_failed, mail_components=sorted(k for k in comps if k.startswith("mail:")),
+                  llm_components=sorted(k for k in comps if k.startswith("ollama:")))
 
 
 @app.post("/status/test-notification")

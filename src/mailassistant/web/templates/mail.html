@@ -29,7 +29,7 @@
     <td><input type="checkbox" name="ids" value="{{ e.id }}" form="trash" aria-label="select mail {{ e.id }}"></td>
     <td class="nowrap">{{ (e.sent_at or e.received_at)|local('%d %b %H:%M') }}</td>
     <td><b>{{ e.subject or '(no subject)' }}</b><div class="muted small">{{ e.from_name or '' }} &lt;{{ e.from_addr }}&gt;{% if accounts %} <span class="tag">{{ accounts.get(e.account_id, '?') }}</span>{% endif %}</div></td>
-    <td><span class="tag">{{ c.category }}</span> {{ c.importance }} <span class="muted">{{ '%.2f'|format(c.confidence or 0) }} · {{ c.source }}</span>
+    <td><span class="tag">{{ c.category }}</span> {{ c.importance }} <span class="muted">{{ '%.2f'|format(c.confidence or 0) }} · {{ c.source }}</span>{% if c.served_by == 'server' %} <span class="tag" title="classified by the small fallback model on the server (the desktop was off)">server model</span>{% endif %}
       {% if c.injection_flag %}<span class="tag hot">injection?</span>{% endif %}
       {% for fl in c.safety_flags or [] %}<span class="tag">{{ fl }}</span>{% endfor %}
       {% if c.reasons %}<div class="muted small">{{ c.reasons|truncate(200) }}</div>{% endif %}

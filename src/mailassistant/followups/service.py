@@ -126,7 +126,8 @@ def _sender(email: Email) -> str:
 
 
 # ------------------------------------------------------------------ extraction
-def store_draft(session: Session, email: Email, d: FollowupDraft, reason: str, settings: Settings) -> Followup | None:
+def store_draft(session: Session, email: Email, d: FollowupDraft, reason: str, settings: Settings,
+                served_by: str | None = None) -> Followup | None:
     if session.scalar(select(Followup.id).where(Followup.dedupe_key == d.dedupe_key)):
         return None
     mine = _mine(session, settings, email)
@@ -152,7 +153,8 @@ def store_draft(session: Session, email: Email, d: FollowupDraft, reason: str, s
                  people=people, action_text=d.action_text, evidence_quote=d.evidence_quote,
                  deadline_at=d.deadline_at, remind_at=when, remind_basis=basis, status="proposed",
                  confidence=Decimal(f"{d.confidence:.3f}"), explanation=(reason or "")[:300],
-                 dedupe_key=d.dedupe_key, notes=d.notes + ([f"deadline_text: {d.deadline_text}"] if d.deadline_text else []))
+                 dedupe_key=d.dedupe_key, notes=d.notes + ([f"deadline_text: {d.deadline_text}"] if d.deadline_text else []),
+                 served_by=served_by)
     session.add(f)
     session.flush()
     _event(session, f, "proposed", "llm-proposal", email_id=email.id)
@@ -189,7 +191,8 @@ def extract_followups(session: Session, email: Email, client, settings: Settings
         min_confidence=settings.followup_min_confidence)
     if rejected:
         log.info("follow-up items rejected for email %s: %s", email.id, ",".join(rejected))
-    return [f for d in drafts if (f := store_draft(session, email, d, res.reason, settings))]
+    served_by = getattr(client, "served_by", None)
+    return [f for d in drafts if (f := store_draft(session, email, d, res.reason, settings, served_by))]
 
 
 # ------------------------------------------------------------------ resolution (proposed only)

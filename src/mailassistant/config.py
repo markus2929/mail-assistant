@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     # Ollama on another machine behind the HTTPS proxy (docker-compose.ollama-proxy.yml):
     ollama_token: SecretStr | None = None   # secret file: bearer token the proxy expects
     ollama_cert_sha256: str | None = None   # pin of the proxy's certificate (printed by web.makecert)
+    # Fallback Ollama (e.g. small CPU model on the home server), used only when the one above is unreachable:
+    ollama_fallback_url: str = ""           # e.g. http://mailassistant-ollama:11434 ; empty = no fallback
+    ollama_fallback_model: str = ""         # one model for every task there (no model swaps on a slow machine)
+    ollama_fallback_timeout_seconds: float = 600.0   # CPU inference is slow
 
     # --- Google Calendar (Phase 4) ---
     google_client_file: str = "/run/secrets/google_client"   # OAuth "Desktop app" client JSON

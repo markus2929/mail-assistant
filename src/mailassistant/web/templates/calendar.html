@@ -29,7 +29,7 @@
     {% if show == 'open' %}<td><input type="checkbox" name="ids" value="{{ p.id }}" form="bulk" aria-label="select #{{ p.id }}"></td>{% endif %}
     <td>#{{ p.id }}</td>
     <td>{{ p.start_at|local('%a %d %b %Y' if p.all_day else '%a %d %b %Y %H:%M') }}{% if not p.all_day %}–{{ p.end_at|local('%H:%M') }}{% endif %}</td>
-    <td><b>{{ p.title or '(no title)' }}</b> <span class="tag">{{ p.kind }}</span>
+    <td><b>{{ p.title or '(no title)' }}</b> <span class="tag">{{ p.kind }}</span>{% if p.served_by == 'server' %} <span class="tag" title="found by the small fallback model on the server (the desktop was off)">server model</span>{% endif %}
       {% if p.location %}<div class="small">@ {{ p.location }}</div>{% endif %}
       {% set capt = (e.headers or {}).get('_capture') %}
       {% if capt %}<div class="small"><span class="tag">added by you via {{ {'assist': 'voice', 'dashboard': 'dashboard', 'mail': 'forwarded mail'}[capt.source] }}</span></div>

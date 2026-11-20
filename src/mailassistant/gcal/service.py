@@ -161,7 +161,8 @@ def _same_as_open_proposal(session: Session, d: Draft, from_ics: bool, settings:
     return None, False
 
 
-def store_draft(session: Session, email: Email, d: Draft, attachment_id: int | None, settings: Settings) -> EventProposal | None:
+def store_draft(session: Session, email: Email, d: Draft, attachment_id: int | None, settings: Settings,
+                served_by: str | None = None) -> EventProposal | None:
     if session.scalar(select(EventProposal.id).where(EventProposal.dedupe_key == d.dedupe_key)):
         return None  # already proposed (same invitation / same extraction)
     if d.ics_uid:  # an updated invitation replaces still-open older proposals for the same UID
@@ -188,7 +189,8 @@ def store_draft(session: Session, email: Email, d: Draft, attachment_id: int | N
         location=d.location, organiser=d.organiser, attendees=d.attendees, meeting_url=d.meeting_url,
         conflicts=conflicts, confidence=d.confidence, evidence_quote=d.evidence_quote,
         status="superseded" if dupes or (other is not None and not new_wins) else "proposed",
-        google_event_id=None, dedupe_key=d.dedupe_key, notes=notes, target_calendar=target_cal)
+        google_event_id=None, dedupe_key=d.dedupe_key, notes=notes, target_calendar=target_cal,
+        served_by=served_by)
     session.add(p)
     session.flush()
     if other is not None and new_wins:  # the new one is better (e.g. has a time): it replaces the open one
@@ -261,7 +263,8 @@ def scan_email(session: Session, email_id: int, llm_client, settings: Settings, 
                 min_confidence=settings.calendar_min_confidence)
             if d is None:
                 log.info("model extraction rejected: %s", why)
-            elif p := store_draft(session, email, d, None, settings):
+            elif p := store_draft(session, email, d, None, settings,
+                                  served_by=getattr(llm_client, "served_by", None)):
                 out.append(p)
         except StructuredOutputError:
             log.info("event extraction: model output unusable for email %s", email_id)

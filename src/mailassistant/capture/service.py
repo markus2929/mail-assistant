@@ -125,7 +125,7 @@ def _events(session: Session, email: Email, cap: Capture, client, settings: Sett
         for ev in parse_ics(att.ics_text or "", tz):
             d, why = draft_from_ics(ev, subject=subject, now=now, default_tz=tz)
             if d is not None and not d.cancel:
-                drafts.append((d, att.id))
+                drafts.append((d, att.id, None))
             elif why:
                 result["reasons"].setdefault("event", why)
     if not drafts:
@@ -144,9 +144,9 @@ def _events(session: Session, email: Email, cap: Capture, client, settings: Sett
         if d is None:
             result["reasons"]["event"] = why
             return
-        drafts.append((d, None))
-    for d, att_id in drafts:
-        p = store_draft(session, email, d, att_id, settings) or session.scalar(
+        drafts.append((d, None, getattr(client, "served_by", None)))
+    for d, att_id, served_by in drafts:
+        p = store_draft(session, email, d, att_id, settings, served_by) or session.scalar(
             select(EventProposal).where(EventProposal.dedupe_key == d.dedupe_key))
         if p is not None:
             result["events"].append(_event_record(p))
@@ -172,7 +172,7 @@ def _followups(session: Session, email: Email, client, settings: Settings, text:
         res.model_dump(), mail_direction="capture", own=text, subject=subject, message_id=email.message_id,
         sent_at=email.sent_at or utcnow(), tz=settings.timezone, min_confidence=settings.followup_min_confidence)
     for d in drafts:
-        f = store_draft(session, email, d, res.reason, settings) or session.scalar(
+        f = store_draft(session, email, d, res.reason, settings, getattr(client, "served_by", None)) or session.scalar(
             select(Followup).where(Followup.dedupe_key == d.dedupe_key))
         if f is not None:
             result["followups"].append(_followup_record(f))

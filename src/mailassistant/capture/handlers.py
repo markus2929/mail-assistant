@@ -1,4 +1,3 @@
-import copy
 import logging
 import time
 from datetime import timedelta
@@ -7,7 +6,8 @@ from mailassistant.capture.service import process_capture, register_mail_capture
 from mailassistant.config import get_settings
 from mailassistant.db.session import session_scope
 from mailassistant.jobs.registry import Deferred, handler
-from mailassistant.llm.client import LLMModelMissing, LLMUnavailable, OllamaClient
+from mailassistant.llm.client import LLMModelMissing, LLMUnavailable
+from mailassistant.llm.fallback import llm_client
 
 log = logging.getLogger(__name__)
 _down_until = 0.0
@@ -28,14 +28,9 @@ def capture_process(payload: dict) -> None:
     if time.monotonic() < _down_until:
         raise Deferred("ollama unavailable (waiting)", timedelta(minutes=2))
     s = get_settings()
-    event_client = OllamaClient.from_settings(s)
-    followup_client = copy.copy(event_client)
-    if s.followup_ollama_model:
-        followup_client.model = s.followup_ollama_model
-    voice_client = None
-    if s.capture_voice_followup_model:
-        voice_client = copy.copy(event_client)
-        voice_client.model = s.capture_voice_followup_model
+    event_client = llm_client(s, "event")
+    followup_client = llm_client(s, "followup")
+    voice_client = llm_client(s, "voice") if s.capture_voice_followup_model else None
     try:
         with session_scope() as session:
             cap = process_capture(session, int(payload["capture_id"]), event_client, followup_client, s,
