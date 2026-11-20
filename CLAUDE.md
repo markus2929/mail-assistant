@@ -1,8 +1,8 @@
 # Mail Assistant - project brief for Claude Code
 
 Self-hosted, privacy-first AI email assistant for Proton Mail + Google Calendar. Python 3.12,
-PostgreSQL 17, SQLAlchemy 2, Pydantic, Docker Compose. Everything runs on the user's Arch Linux
-desktop (Ryzen 5 7600, RX 7700 XT 12 GB). Read `docs/ARCHITECTURE.md` and `README.md` first (design decisions; installing and using);
+PostgreSQL 17, SQLAlchemy 2, Pydantic, Docker Compose, local Ollama. The user's own machines, addresses and
+deployment details are in `CLAUDE.local.md` (not committed; this repository is public). Read `docs/ARCHITECTURE.md` and `README.md` first (design decisions; installing and using);
 `docs/HISTORY.md` has the original per-phase notes and verification queries.
 
 ## Non-negotiable rules
@@ -29,9 +29,8 @@ desktop (Ryzen 5 7600, RX 7700 XT 12 GB). Read `docs/ARCHITECTURE.md` and `READM
   Secrets are files in `./secrets/`.
 - Ollama models: classification `OLLAMA_MODEL=dolphin3:latest` (fast); follow-ups
   `FOLLOWUP_OLLAMA_MODEL=qwen3-14b-16k:latest` (dolphin3 produced mostly noise there). Context requested per call: `OLLAMA_NUM_CTX=8192`.
-- User: Dutch + English mail; own addresses me@example.com, info@example-business.com,
-  orders@example-business.com; timezone Europe/Amsterdam. Synced Bridge folders: INBOX, Sent, Archive,
-  `Folders/*`. "Ads" is a Proton *label* (`Labels/Ads`); labels/Spam/Trash/All Mail are not synced.
+- Mail is Dutch + English; own addresses come from `MY_ADDRESSES` + `mail_accounts` (`own_addresses`);
+  timezone `TIMEZONE` (Europe/Amsterdam). Synced Bridge folders: INBOX, Sent, Archive, `Folders/*`. "Ads" is a Proton *label* (`Labels/Ads`); labels/Spam/Trash/All Mail are not synced.
 - Tests: `pip install -e '.[dev]'`; `pytest tests/unit` needs nothing. DB tests need an EMPTY throwaway
   database: `TEST_DATABASE_URL=postgresql+psycopg://mailassistant:$(cat secrets/db_password)@127.0.0.1:5433/mailtest pytest`
   (create it with `CREATE DATABASE mailtest`). It drops all tables there.
@@ -93,7 +92,8 @@ desktop (Ryzen 5 7600, RX 7700 XT 12 GB). Read `docs/ARCHITECTURE.md` and `READM
 - Every model task: versioned prompt (`PROMPT_VERSION`), `run_structured` with one repair retry, calls
   recorded in `llm_calls` (purged after `LLM_LOG_RETENTION_DAYS`), "LLM down" = `Deferred` job, never lost.
 - Jobs: Postgres queue (`db/queue.py`); handlers register with `@handler`; periodic jobs in `jobs/scheduler.py`.
-- User preference: when delivering code in chat, state which files/folders to copy into the deployed project.
+- Never put personal data (real addresses, host names, IPs, names) in committed files; use `example.com` /
+  `192.168.1.x` placeholders. Personal notes go to `CLAUDE.local.md`.
 
 ## Mail accounts and Move to Trash (2026-11-18)
 - Extra IMAP accounts live in `mail_accounts` (kind `imap`; the Proton account stays in `.env`), managed with
