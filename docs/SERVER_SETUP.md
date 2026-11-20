@@ -160,5 +160,18 @@ the README section "Extra mail accounts" and [MICROSOFT_SETUP.md](MICROSOFT_SETU
 a code you enter on any device, so it works on a server without a browser.
 
 ## Backups
-Back up the server's `secrets/`, `.env` and the two volumes (`pgdata`, `bridge`), e.g. a nightly
-`docker compose exec -T db pg_dump -U mailassistant -Fc mailassistant > backup.dump` to an encrypted location.
+`scripts/backup.sh [DIR]` writes a database dump (checked with `pg_restore --list`) and a copy of `.env` +
+`secrets/` to `DIR` (default `~/backups/mail-assistant`) and removes backups older than `BACKUP_KEEP_DAYS` (14).
+Both files hold private data (mail, keys): they are created readable by you only; keep `DIR` on another disk or
+machine, ideally encrypted. Run it nightly from your crontab (`crontab -e`):
+```sh
+30 2 * * * cd ~/mail-assistant && scripts/backup.sh >> ~/backups/mail-assistant/backup.log 2>&1
+```
+The `bridge` volume needs no backup (sign in to Bridge again instead).
+
+Restore (into an empty database, e.g. after reinstalling):
+```sh
+tar -xzf config-<date>.tar.gz              # .env + secrets/ (fernet_key decrypts the stored sign-ins)
+docker compose up -d db && docker compose exec -T db pg_restore -U mailassistant -d mailassistant --clean --if-exists < db-<date>.dump
+docker compose up -d
+```
