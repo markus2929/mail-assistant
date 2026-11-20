@@ -83,9 +83,30 @@ services:
     depends_on:
       migrate: {condition: service_completed_successfully}
 
+  # Optional fallback Ollama on this server (CPU), used when the desktop's Ollama is not reachable.
+  # Enable with COMPOSE_PROFILES=server-llm and OLLAMA_FALLBACK_URL/OLLAMA_FALLBACK_MODEL in .env;
+  # pull the model with: docker compose exec ollama ollama pull <model>   (docs/SERVER_SETUP.md)
+  ollama:
+    image: ollama/ollama:0.40.13
+    profiles: [server-llm]
+    labels: {com.centurylinklabs.watchtower.enable: "false"}   # update deliberately, not via Watchtower
+    volumes: ["ollama-models:/root/.ollama"]
+    environment:
+      OLLAMA_NUM_PARALLEL: "1"          # one request at a time on a small CPU
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_KEEP_ALIVE: "10m"          # unload when idle: the memory goes back to the other services
+    cpus: "${OLLAMA_SERVER_CPUS:-3}"    # leave room for everything else on the server
+    mem_limit: "${OLLAMA_SERVER_MEMORY:-6g}"   # out of memory -> only this container is killed
+    networks:
+      default:
+        aliases: [mailassistant-ollama]   # OLLAMA_FALLBACK_URL=http://mailassistant-ollama:11434 (never published)
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+
 volumes:
   pgdata:
   bridge:
+  ollama-models:
 
 secrets:
   database_url: {file: ./secrets/database_url}      # postgresql+psycopg://mailassistant:<db_password>@mailassistant-db:5432/mailassistant
