@@ -10,6 +10,7 @@
   <form method="post" action="/login">
     <input type="hidden" name="csrf" value="{{ login_csrf }}">
     <label>Password <input type="password" name="password" autocomplete="current-password" required autofocus></label>
+    <label class="small"><input type="checkbox" name="remember" value="1"> Keep me signed in on this device</label>
     <button>Log in</button>
   </form>
 </section>

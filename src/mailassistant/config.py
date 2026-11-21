@@ -86,6 +86,7 @@ class Settings(BaseSettings):
     web_trusted_proxies: str = "127.0.0.1"  # X-Forwarded-For trusted only from these addresses/ranges (comma-separated)
     web_session_idle_hours: int = 12
     web_session_max_days: int = 7
+    web_remember_days: int = 90            # "keep me signed in on this device": no idle logout, this many days
     dashboard_url: str = ""                 # used in notifications, e.g. https://desktop.local:8443
 
     # --- Home Assistant notifications (Phase 6, optional) ---

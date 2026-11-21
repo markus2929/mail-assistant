@@ -145,7 +145,8 @@ a tunnel; the code does not assume where Bridge or Ollama run.
 - **Health:** `system.ping` (every minute) writes `service_status` rows for worker and Ollama; mail sync and
   calendar sync write `bridge`/`google`; HA pushes write `homeassistant`. No mail content in `detail`.
 - **Auth:** one user; scrypt hash in `secrets/web_password_hash`; random session token in an HttpOnly/Secure/
-  SameSite=Strict cookie, only its SHA-256 in `web_sessions` (12 h idle, 7 d max); in-memory login throttle;
+  SameSite=Lax cookie (Strict was not sent when opened from a notification), only its SHA-256 in `web_sessions`
+  (12 h idle, 7 d max; "keep me signed in": no idle timeout, `WEB_REMEMBER_DAYS` = 90 d max); in-memory login throttle;
   login/logout/failures audited. **CSRF:** per-session token in every form; login form uses a double-submit
   cookie. **Headers:** CSP without inline script/style, frame-ancestors none, no-referrer, HSTS, Host allowlist.
 - **TLS:** `WEB_TLS=self` (built-in certificate), `proxy` (behind a TLS proxy; forwarded headers trusted only

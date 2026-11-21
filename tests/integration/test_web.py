@@ -450,3 +450,32 @@ def test_trash_handler_moves_only_verified_uids(s, engine, monkeypatch):
     assert calls[0][0] == "INBOX" and calls[0][1] == 7 and set(calls[0][2]) == {11, 12}
     assert s.scalar(select(EmailLocation.removed_at).where(EmailLocation.uid == 11)) is not None
     assert s.scalar(select(EmailLocation.removed_at).where(EmailLocation.uid == 12)) is None
+
+
+def test_cookies_are_lax_so_links_from_notifications_keep_the_session(client):
+    page = client.get("/login")
+    assert "samesite=lax" in page.headers["set-cookie"].lower()
+    r = client.post("/login", data={"csrf": csrf_of(page.text), "password": PW}, follow_redirects=False)
+    session_cookie = next(h for h in r.headers.get_list("set-cookie") if h.startswith("ma_session="))
+    assert "samesite=lax" in session_cookie.lower() and "httponly" in session_cookie.lower()
+
+
+def test_keep_me_signed_in_survives_the_idle_timeout(client, s, settings):
+    page = client.get("/login")
+    r = client.post("/login", data={"csrf": csrf_of(page.text), "password": PW, "remember": "1"},
+                    follow_redirects=False)
+    assert f"max-age={settings.web_remember_days * 86400}" in r.headers["set-cookie"].lower()
+    ws = s.scalars(select(WebSession)).one()
+    assert ws.remember and ws.expires_at > utcnow() + timedelta(days=settings.web_remember_days - 1)
+    ws.last_seen_at = utcnow() - timedelta(hours=settings.web_session_idle_hours + 5)   # long idle
+    s.commit()
+    assert client.get("/", follow_redirects=False).status_code == 200
+
+
+def test_normal_session_still_has_the_idle_timeout(client, s, settings):
+    login(client)
+    ws = s.scalars(select(WebSession)).one()
+    assert not ws.remember
+    ws.last_seen_at = utcnow() - timedelta(hours=settings.web_session_idle_hours + 1)
+    s.commit()
+    assert client.get("/", follow_redirects=False).status_code == 303

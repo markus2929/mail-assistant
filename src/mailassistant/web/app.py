@@ -99,12 +99,15 @@ def redirect(url: str, flash: str | None = None) -> RedirectResponse:
     resp = RedirectResponse(url, status_code=303)
     if flash:
         resp.set_cookie(FLASH_COOKIE, quote(flash[:400]), max_age=60, httponly=True, secure=True,
-                        samesite="strict", path="/")
+                        samesite="lax", path="/")
     return resp
 
 
 def _set_cookie(resp: Response, name: str, value: str, max_age: int) -> None:
-    resp.set_cookie(name, value, max_age=max_age, httponly=True, secure=True, samesite="strict", path="/")
+    # Lax, not Strict: a Strict cookie is not sent when the dashboard is opened from another app (e.g. a
+    # notification), so you would always look logged out. Lax still keeps it off cross-site POSTs, and every POST
+    # needs the session's CSRF token anyway; GET pages never change anything.
+    resp.set_cookie(name, value, max_age=max_age, httponly=True, secure=True, samesite="lax", path="/")
 
 
 # ------------------------------------------------------------------ middleware: host, auth, csrf, headers
@@ -160,7 +163,8 @@ def _load_session(token: str) -> tuple[str, str] | None:
         ws = d.get(WebSession, token_hash(token))
         if ws is None:
             return None
-        if ws.expires_at < now or ws.last_seen_at < now - timedelta(hours=s.web_session_idle_hours):
+        idle_out = not ws.remember and ws.last_seen_at < now - timedelta(hours=s.web_session_idle_hours)
+        if ws.expires_at < now or idle_out:
             d.delete(ws)
             return None
         if ws.last_seen_at < now - timedelta(minutes=1):
@@ -213,14 +217,17 @@ async def login(request: Request):
         return redirect("/login", "Wrong password.")
     throttle.succeeded(who)
     token, now = new_token(), utcnow()
+    remember = (form.get("remember") or [""])[0] == "1"
+    days = s.web_remember_days if remember else s.web_session_max_days
     with db() as d:
         d.execute(delete(WebSession).where(WebSession.expires_at < now))
         d.add(WebSession(id_hash=token_hash(token), csrf_token=new_token(), created_at=now, last_seen_at=now,
-                         expires_at=now + timedelta(days=s.web_session_max_days),
+                         expires_at=now + timedelta(days=days), remember=remember,
                          user_agent=(request.headers.get("user-agent") or "")[:200]))
-        audit.record(d, actor="user", action="web_login", detail=f"from {who}")
+        audit.record(d, actor="user", action="web_login",
+                     detail=f"from {who}" + (f"; remembered for {days} days" if remember else ""))
     resp = redirect("/")
-    _set_cookie(resp, COOKIE, token, s.web_session_max_days * 86400)
+    _set_cookie(resp, COOKIE, token, days * 86400)
     resp.delete_cookie(LOGIN_COOKIE, path="/")
     return resp
 

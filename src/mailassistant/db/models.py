@@ -403,6 +403,7 @@ class WebSession(Base):
     last_seen_at: Mapped[datetime] = mapped_column(TZ, server_default=NOW)
     expires_at: Mapped[datetime] = mapped_column(TZ, index=True)
     user_agent: Mapped[str | None] = mapped_column(String(200))
+    remember: Mapped[bool] = mapped_column(Boolean, server_default="false")   # no idle timeout
 
 
 class ServiceStatus(Base):
