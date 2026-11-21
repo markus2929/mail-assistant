@@ -479,3 +479,11 @@ def test_normal_session_still_has_the_idle_timeout(client, s, settings):
     ws.last_seen_at = utcnow() - timedelta(hours=settings.web_session_idle_hours + 1)
     s.commit()
     assert client.get("/", follow_redirects=False).status_code == 303
+
+
+def test_login_page_loaded_twice_still_works(client):
+    """Phones preload the page: the form shown is from the first load, the cookie from the second."""
+    first = client.get("/login")
+    client.get("/login")
+    r = client.post("/login", data={"csrf": csrf_of(first.text), "password": PW}, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/"

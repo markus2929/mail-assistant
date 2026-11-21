@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import json
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import date, datetime, time, timedelta
@@ -193,7 +194,10 @@ def healthz() -> dict:
 
 @app.get("/login", response_class=HTMLResponse)
 def login_form(request: Request):
-    pre = new_token()
+    # Reuse the token from the cookie if there is one: phones often load the page twice (preload + display), and a
+    # new token per load would overwrite the cookie so the visible form no longer matches ("form expired").
+    old = request.cookies.get(LOGIN_COOKIE) or ""
+    pre = old if re.fullmatch(r"[A-Za-z0-9_-]{32,128}", old) else new_token()
     resp = render(request, "login.html", login_csrf=pre,
                   configured=settings().web_password_hash is not None)
     _set_cookie(resp, LOGIN_COOKIE, pre, 900)
